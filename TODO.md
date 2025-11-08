@@ -1,0 +1,2 @@
+- [ ] std::task ：通用异步任务类型，支持co_await等待结果，可组合多个任务（如when_all/when_any），替代手动实现的异步任务框架。
+- [ ] 与std::future的整合：允许co_await直接等待std::future，消除两者的割裂
