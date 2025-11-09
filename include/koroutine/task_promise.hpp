@@ -24,7 +24,7 @@ class Task;
 
 template <typename ResultType>
 struct TaskPromise {
-  auto initial_suspend() { return DispatchAwaiter{executor}; }
+  auto initial_suspend() { return DispatchAwaiter{executor.lock()}; }
   auto final_suspend() noexcept { return std::suspend_always{}; }
   Task<ResultType> get_return_object() {
     return Task<ResultType>{
@@ -46,7 +46,8 @@ struct TaskPromise {
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl awaiter) {
-    awaiter.install_executor(executor);
+    LOG_TRACE("TaskPromise::await_transform - installing executor");
+    awaiter.install_executor(executor.lock());
     return awaiter;
   }
 
@@ -93,7 +94,8 @@ struct TaskPromise {
 
   std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
 
-  std::shared_ptr<AbstractExecutor> executor;
+  std::weak_ptr<AbstractExecutor> executor =
+      ExecutorManager::get_default_executor();
 
   void notify_callbacks() {
     for (auto& callback : completion_callbacks) {
@@ -105,7 +107,7 @@ struct TaskPromise {
 
 template <>
 struct TaskPromise<void> {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{executor}; }
+  DispatchAwaiter initial_suspend() { return DispatchAwaiter{executor.lock()}; }
   auto final_suspend() noexcept { return std::suspend_always{}; }
   Task<void> get_return_object();
 
@@ -126,7 +128,7 @@ struct TaskPromise<void> {
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
     // automatically transfer executor
-    awaiter.install_executor(executor);
+    awaiter.install_executor(executor.lock());
     return awaiter;
   }
 
@@ -173,7 +175,7 @@ struct TaskPromise<void> {
 
   std::list<std::function<void(Result<void>)>> completion_callbacks;
 
-  std::shared_ptr<AbstractExecutor> executor =
+  std::weak_ptr<AbstractExecutor> executor =
       ExecutorManager::get_default_executor();
 
   void notify_callbacks() {

@@ -18,6 +18,18 @@ Task<void> loop_2() {
     co_await sleep_for(1000);
   }
 }
+Task<void> loop_3() {
+  while (true) {
+    std::cout << "Loop 3 executing..." << std::endl;
+    co_await sleep_for(1500);
+  }
+}
+Task<void> loop_4() {
+  while (true) {
+    std::cout << "Loop 4 executing..." << std::endl;
+    co_await sleep_for(1500);
+  }
+}
 
 int main() {
   debug::set_level(debug::Level::Debug);
@@ -26,10 +38,14 @@ int main() {
   // create a shared async executor
   std::cout << "Starting coroutine task..." << std::endl;
   auto task = []() -> Task<int> {
-    //   switch to async executor
-    // co_await switch_executor(std::make_shared<AsyncExecutor>());
-    LOG_DEBUG("In async executor.");
+    std::cout << "Task started, sleeping for 2 seconds..." << std::endl;
+    co_await sleep_for(2000);
+    std::cout << "Woke up, switching to AsyncExecutor..." << std::endl;
+    co_await switch_executor(std::make_shared<AsyncExecutor>());
+    std::cout << "Now running on AsyncExecutor, sleeping for 1 second..."
+              << std::endl;
     co_await sleep_for(1000);
+    std::cout << "Woke up, returning result 42." << std::endl;
     co_return 42;
   }();
 
@@ -39,6 +55,7 @@ int main() {
 
   //   Start two infinite loops on the same executor
   auto exec = std::make_shared<LooperExecutor>();
-  Runtime::join_all(loop_1().via(exec), loop_2().via(exec));
+  Runtime::join_all(loop_1().via(exec), loop_2().via(exec), loop_3().via(exec),
+                    loop_4().via(exec));
   return 0;
 }

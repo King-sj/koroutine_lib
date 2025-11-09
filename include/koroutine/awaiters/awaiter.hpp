@@ -23,6 +23,9 @@ class AwaiterBase {
   }
 
   void install_executor(std::shared_ptr<AbstractExecutor> executor) {
+    if (!executor) {
+      LOG_WARN("AwaiterBase::install_executor - null executor provided");
+    }
     _executor = executor;
   }
 
@@ -82,6 +85,9 @@ class AwaiterBase<void> {
   }
 
   void install_executor(std::shared_ptr<AbstractExecutor> executor) {
+    if (!executor) {
+      LOG_WARN("AwaiterBase::install_executor - null executor provided");
+    }
     _executor = executor;
   }
 
