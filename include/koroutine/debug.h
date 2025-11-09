@@ -61,6 +61,39 @@ inline std::mutex& g_cout_mutex() {
 }
 inline std::ostream* g_out = &std::clog;
 
+// Color support (ANSI escape sequences). Can be disabled at runtime.
+inline std::atomic<bool> g_color_enabled{true};
+inline void set_color_enabled(bool v) {
+  g_color_enabled.store(v, std::memory_order_relaxed);
+}
+inline bool get_color_enabled() {
+  return g_color_enabled.load(std::memory_order_relaxed);
+}
+
+inline const char* COLOR_RESET = "\033[0m";
+inline const char* COLOR_RED = "\033[31m";
+inline const char* COLOR_YELLOW = "\033[33m";
+inline const char* COLOR_GREEN = "\033[32m";
+inline const char* COLOR_BLUE = "\033[34m";
+inline const char* COLOR_MAGENTA = "\033[35m";
+
+inline const char* level_color(Level lvl) {
+  switch (lvl) {
+    case Level::Error:
+      return COLOR_RED;
+    case Level::Warn:
+      return COLOR_YELLOW;
+    case Level::Info:
+      return COLOR_GREEN;
+    case Level::Debug:
+      return COLOR_BLUE;
+    case Level::Trace:
+      return COLOR_MAGENTA;
+    default:
+      return COLOR_RESET;
+  }
+}
+
 inline void set_level(Level l) { g_level.store(l, std::memory_order_relaxed); }
 inline Level get_level() { return g_level.load(std::memory_order_relaxed); }
 
@@ -126,7 +159,12 @@ inline void emit(Level lvl, const std::string& header,
                  const std::string& body) {
   std::lock_guard<std::mutex> lk(g_cout_mutex());
   if (g_out) {
-    (*g_out) << header << body << std::endl;
+    if (get_color_enabled()) {
+      const char* c = level_color(lvl);
+      (*g_out) << c << header << body << COLOR_RESET << std::endl;
+    } else {
+      (*g_out) << header << body << std::endl;
+    }
   }
 }
 
