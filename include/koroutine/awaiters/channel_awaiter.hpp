@@ -9,6 +9,7 @@ struct Channel;
 
 template <typename ValueType>
 struct WriterAwaiter : public AwaiterBase<void> {
+  friend struct Channel<ValueType>;
   Channel<ValueType>* channel;
   ValueType _value;
 
@@ -20,6 +21,10 @@ struct WriterAwaiter : public AwaiterBase<void> {
         channel(std::exchange(other.channel, nullptr)),
         _value(std::move(other._value)) {}
 
+  ~WriterAwaiter() {
+    if (channel) channel->remove_writer(this);
+  }
+
  protected:
   void after_suspend() override { channel->try_push_writer(this); }
 
@@ -27,14 +32,11 @@ struct WriterAwaiter : public AwaiterBase<void> {
     channel->check_closed();
     channel = nullptr;
   }
-
-  ~WriterAwaiter() {
-    if (channel) channel->remove_writer(this);
-  }
 };
 
 template <typename ValueType>
 struct ReaderAwaiter : public AwaiterBase<ValueType> {
+  friend struct Channel<ValueType>;
   Channel<ValueType>* channel;
   ValueType* p_value = nullptr;
 
@@ -45,6 +47,11 @@ struct ReaderAwaiter : public AwaiterBase<ValueType> {
         channel(std::exchange(other.channel, nullptr)),
         p_value(std::exchange(other.p_value, nullptr)) {}
 
+  ~ReaderAwaiter() {
+    if (channel) channel->remove_reader(this);
+  }
+
+ protected:
   void after_suspend() override { channel->try_push_reader(this); }
 
   void before_resume() override {
@@ -53,9 +60,6 @@ struct ReaderAwaiter : public AwaiterBase<ValueType> {
       *p_value = this->_result->get_or_throw();
     }
     channel = nullptr;
-  }
-  ~ReaderAwaiter() {
-    if (channel) channel->remove_reader(this);
   }
 };
 

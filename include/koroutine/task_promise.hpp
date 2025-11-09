@@ -31,15 +31,14 @@ struct TaskPromise {
         std::coroutine_handle<TaskPromise<ResultType>>::from_promise(*this)};
   }
 
-  template <typename _ResultType, typename>
+  template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
     return TaskAwaiter<_ResultType>{std::move(task)};
   }
 
   template <typename _Rep, typename _Period>
-  TaskAwaiter<ResultType> await_transform(
-      std::chrono::duration<_Rep, _Period>&& duration) {
-    return await_transform(SleepAwaiter(duration));
+  auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    return await_transform(SleepAwaiter(duration.count()));
   }
 
   template <typename AwaiterImpl>
@@ -111,16 +110,16 @@ struct TaskPromise<void> {
   auto final_suspend() noexcept { return std::suspend_always{}; }
   Task<void> get_return_object();
 
-  template <typename _ResultType, typename>
+  TaskAwaiter<void> await_transform(Task<void>&& task);
+
+  template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
-    return await_transform(TaskAwaiter<_ResultType>(std::move(task)));
+    return TaskAwaiter<_ResultType>{std::move(task)};
   }
 
   template <typename _Rep, typename _Period>
   auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
-    return await_transform(
-        std::chrono::duration_cast<std::chrono::milliseconds>(duration)
-            .count());
+    return await_transform(SleepAwaiter(duration));
   }
 
   template <typename AwaiterImpl>

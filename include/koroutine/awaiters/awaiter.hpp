@@ -9,6 +9,13 @@ template <typename R>
 class AwaiterBase {
  public:
   using ResultType = R;
+  // default constructor
+  AwaiterBase() = default;
+  // move constructor
+  AwaiterBase(AwaiterBase&& awaiter) noexcept
+      : _executor(std::move(awaiter._executor)),
+        _handle(std::move(awaiter._handle)),
+        _result(std::move(awaiter._result)) {}
 
   bool await_ready() const { return false; }
 
@@ -71,6 +78,13 @@ template <>
 class AwaiterBase<void> {
  public:
   using ResultType = void;
+  // default constructor
+  AwaiterBase() = default;
+  //   move constructor
+  AwaiterBase(AwaiterBase&& awaiter) noexcept
+      : _executor(std::move(awaiter._executor)),
+        _handle(std::move(awaiter._handle)),
+        _result(std::move(awaiter._result)) {}
 
   bool await_ready() const { return false; }
 

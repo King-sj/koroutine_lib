@@ -1,5 +1,6 @@
 #pragma once
 
+#include "channel.hpp"
 #include "executors/executor.h"
 #include "generator.hpp"
 #include "runtime.hpp"

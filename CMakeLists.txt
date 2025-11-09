@@ -40,7 +40,7 @@ FetchContent_MakeAvailable(googletest)
 
 add_subdirectory(src)
 add_subdirectory(tests)
-
+add_subdirectory(demos)
 # 安装目标
 install(DIRECTORY include/ DESTINATION include)
 install(TARGETS koroutinelib_static koroutinelib_shared

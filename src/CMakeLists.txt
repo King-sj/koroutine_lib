@@ -33,13 +33,3 @@ target_include_directories(koroutinelib_shared PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-
-# Demo可执行文件
-add_executable(koroutine_demo
-    demo.cpp
-)
-
-target_link_libraries(koroutine_demo
-    PRIVATE
-    koroutinelib_static
-)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 #include "../coroutine_common.h"
 #include "../executors/executor.h"
 #include "awaiter.hpp"
@@ -13,9 +15,7 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
   explicit TaskAwaiter(Task<ResultType>&& task) noexcept
       : task_(std::move(task)) {}
 
-  TaskAwaiter(TaskAwaiter&& awaiter) noexcept
-      : AwaiterBase<ResultType>(std::move(awaiter)),
-        task_(std::move(awaiter.task_)) {}
+  TaskAwaiter(TaskAwaiter&&) noexcept = default;
 
   TaskAwaiter(TaskAwaiter&) = delete;
 
@@ -27,7 +27,13 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
   }
 
   void before_resume() override {
-    this->_result = Result<ResultType>(task_.get_result());
+    if constexpr (std::is_void_v<ResultType>) {
+      // Task::get_result() returns void for ResultType = void, just call it
+      task_.get_result();
+      this->_result = Result<void>();
+    } else {
+      this->_result = Result<ResultType>(task_.get_result());
+    }
   }
 
  private:

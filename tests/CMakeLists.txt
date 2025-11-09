@@ -5,6 +5,7 @@ enable_testing()
 add_executable(test_unit
     unit/test_basic.cpp
     unit/test_executor.cpp
+    unit/test_channel.cpp
 )
 
 # 链接库和gtest
