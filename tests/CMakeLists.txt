@@ -4,6 +4,7 @@ enable_testing()
 # 单元测试可执行文件
 add_executable(test_unit
     unit/test_basic.cpp
+    unit/test_executor.cpp
 )
 
 # 链接库和gtest

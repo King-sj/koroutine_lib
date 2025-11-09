@@ -18,8 +18,13 @@ struct SleepAwaiter : public AwaiterBase<void> {
 
  protected:
   void after_suspend() override {
-    static Scheduler scheduler;
-    scheduler.schedule([this] { this->resume(); }, _duration);
+    if (_executor) {
+      // use executor's delayed execution if available
+      _executor->execute_delayed([this] { this->resume(); }, _duration);
+    } else {
+      static Scheduler scheduler;
+      scheduler.schedule([this] { this->resume(); }, _duration);
+    }
   }
 
  private:

@@ -5,12 +5,12 @@
 #include "awaiter.hpp"
 
 namespace koroutine {
-template <typename ResultType, typename Executor>
+template <typename ResultType>
 class Task;
 
-template <typename ResultType, typename Executor>
+template <typename ResultType>
 struct TaskAwaiter : public AwaiterBase<ResultType> {
-  explicit TaskAwaiter(Task<ResultType, Executor>&& task) noexcept
+  explicit TaskAwaiter(Task<ResultType>&& task) noexcept
       : task_(std::move(task)) {}
 
   TaskAwaiter(TaskAwaiter&& awaiter) noexcept
@@ -31,6 +31,6 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
   }
 
  private:
-  Task<ResultType, Executor> task_;
+  Task<ResultType> task_;
 };
 }  // namespace koroutine

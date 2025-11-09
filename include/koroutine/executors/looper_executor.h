@@ -1,81 +1,112 @@
 #pragma once
+
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
+#include <future>
+#include <map>
 #include <mutex>
 #include <queue>
 #include <thread>
 
-#include "../coroutine_common.h"
 #include "executor.h"
+
 namespace koroutine {
 
 class LooperExecutor : public AbstractExecutor {
  private:
-  std::condition_variable queue_condition;
-  std::mutex queue_lock;
-  std::queue<std::function<void()>> executable_queue;
+  using Clock = std::chrono::steady_clock;
+  using TimePoint = Clock::time_point;
+  using TaskPair = std::pair<TimePoint, std::function<void()>>;
 
-  std::atomic<bool> is_active;
-  std::thread work_thread;
+  struct CompareTasks {
+    bool operator()(const TaskPair& a, const TaskPair& b) const {
+      return a.first > b.first;
+    }
+  };
+
+  std::priority_queue<TaskPair, std::vector<TaskPair>, CompareTasks>
+      delayed_tasks_;
+  std::queue<std::function<void()>> tasks_;
+
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::atomic<bool> is_active_{true};
+  std::thread worker_;
 
   void run_loop() {
-    while (is_active.load(std::memory_order_relaxed) ||
-           !executable_queue.empty()) {
-      std::unique_lock lock(queue_lock);
-      if (executable_queue.empty()) {
-        queue_condition.wait(lock);
-        if (executable_queue.empty()) {
-          continue;
+    while (is_active_ || !tasks_.empty() || !delayed_tasks_.empty()) {
+      std::unique_lock lock(mutex_);
+
+      if (tasks_.empty() && delayed_tasks_.empty()) {
+        cv_.wait(lock);
+        if (!is_active_ && tasks_.empty() && delayed_tasks_.empty()) break;
+      }
+
+      if (tasks_.empty()) {
+        auto wait_time = delayed_tasks_.top().first - Clock::now();
+        if (wait_time > Clock::duration::zero()) {
+          cv_.wait_for(lock, wait_time);
         }
       }
-      auto func = executable_queue.front();
-      executable_queue.pop();
-      lock.unlock();
 
-      func();
+      // Move ready delayed tasks to the immediate queue
+      auto now = Clock::now();
+      while (!delayed_tasks_.empty() && delayed_tasks_.top().first <= now) {
+        tasks_.push(
+            std::move(const_cast<TaskPair&>(delayed_tasks_.top()).second));
+        delayed_tasks_.pop();
+      }
+
+      // Execute immediate tasks
+      if (!tasks_.empty()) {
+        auto task = std::move(tasks_.front());
+        tasks_.pop();
+        lock.unlock();
+        task();
+      }
     }
-    // debug("run_loop exit.");
   }
 
  public:
-  LooperExecutor() {
-    is_active.store(true, std::memory_order_relaxed);
-    work_thread = std::thread(&LooperExecutor::run_loop, this);
-  }
+  LooperExecutor() : worker_(&LooperExecutor::run_loop, this) {}
 
   ~LooperExecutor() {
-    shutdown(false);
-    if (work_thread.joinable()) {
-      work_thread.join();
+    shutdown();
+    if (worker_.joinable()) {
+      worker_.join();
     }
   }
 
   void execute(std::function<void()>&& func) override {
-    std::unique_lock lock(queue_lock);
-    if (is_active.load(std::memory_order_relaxed)) {
-      executable_queue.push(func);
-      lock.unlock();
-      queue_condition.notify_one();
+    {
+      std::unique_lock lock(mutex_);
+      LOG_DEBUG("LooperExecutor::execute called.");
+      if (is_active_) {
+        tasks_.push(std::move(func));
+      }
     }
+    cv_.notify_one();
   }
 
-  void shutdown(bool wait_for_complete = true) {
-    is_active.store(false, std::memory_order_relaxed);
-    if (!wait_for_complete) {
-      // clear queue.
-      std::unique_lock lock(queue_lock);
-      decltype(executable_queue) empty_queue;
-      std::swap(executable_queue, empty_queue);
-      lock.unlock();
+  void execute_delayed(std::function<void()>&& func, long long ms) override {
+    {
+      std::unique_lock lock(mutex_);
+      if (is_active_) {
+        auto time_point = Clock::now() + std::chrono::milliseconds(ms);
+        delayed_tasks_.push({time_point, std::move(func)});
+      }
     }
+    cv_.notify_one();
+  }
 
-    queue_condition.notify_all();
+  void shutdown() {
+    is_active_ = false;
+    cv_.notify_all();
   }
+
+  std::thread::id get_thread_id() const { return worker_.get_id(); }
 };
-class SharedLooperExecutor : public AbstractExecutor {
- public:
-  void execute(std::function<void()>&& func) override {
-    static LooperExecutor sharedLooperExecutor;
-    sharedLooperExecutor.execute(std::move(func));
-  }
-};
+
 }  // namespace koroutine

@@ -7,8 +7,10 @@
 #include "awaiters/awaiter.hpp"
 #include "awaiters/dispatch_awaiter.hpp"
 #include "awaiters/sleep_awaiter.hpp"
+#include "awaiters/switch_executor.hpp"
 #include "awaiters/task_awaiter.hpp"
 #include "coroutine_common.h"
+#include "executor_manager.h"
 #include "executors/executor.h"
 
 namespace koroutine {
@@ -17,25 +19,25 @@ template <typename AwaiterImpl, typename R>
 concept AwaiterImplRestriction =
     std::is_base_of<AwaiterBase<R>, AwaiterImpl>::value;
 
-template <typename ResultType, typename Executor>
+template <typename ResultType>
 class Task;
 
-template <typename ResultType, typename Executor>
+template <typename ResultType>
 struct TaskPromise {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{&executor}; }
+  auto initial_suspend() { return DispatchAwaiter{executor}; }
   auto final_suspend() noexcept { return std::suspend_always{}; }
-  Task<ResultType, Executor> get_return_object() {
-    return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
+  Task<ResultType> get_return_object() {
+    return Task<ResultType>{
+        std::coroutine_handle<TaskPromise<ResultType>>::from_promise(*this)};
   }
 
-  template <typename _ResultType, typename _Executor>
-  TaskAwaiter<_ResultType, _Executor> await_transform(
-      Task<_ResultType, _Executor>&& task) {
-    return TaskAwaiter<_ResultType, _Executor>{std::move(task)};
+  template <typename _ResultType, typename>
+  TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
+    return TaskAwaiter<_ResultType>{std::move(task)};
   }
 
   template <typename _Rep, typename _Period>
-  TaskAwaiter<ResultType, Executor> await_transform(
+  TaskAwaiter<ResultType> await_transform(
       std::chrono::duration<_Rep, _Period>&& duration) {
     return await_transform(SleepAwaiter(duration));
   }
@@ -44,7 +46,7 @@ struct TaskPromise {
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl awaiter) {
-    awaiter.install_executor(&executor);
+    awaiter.install_executor(executor);
     return awaiter;
   }
 
@@ -81,6 +83,8 @@ struct TaskPromise {
     }
   }
 
+  void set_executor(std::shared_ptr<AbstractExecutor> ex) { executor = ex; }
+
  private:
   std::optional<Result<ResultType>> result;
 
@@ -89,7 +93,7 @@ struct TaskPromise {
 
   std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
 
-  Executor executor;
+  std::shared_ptr<AbstractExecutor> executor;
 
   void notify_callbacks() {
     for (auto& callback : completion_callbacks) {
@@ -99,34 +103,30 @@ struct TaskPromise {
   }
 };
 
-template <typename Executor>
-struct TaskPromise<void, Executor> {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{&executor}; }
+template <>
+struct TaskPromise<void> {
+  DispatchAwaiter initial_suspend() { return DispatchAwaiter{executor}; }
   auto final_suspend() noexcept { return std::suspend_always{}; }
-  Task<void, Executor> get_return_object() {
-    return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
-  }
+  Task<void> get_return_object();
 
-  template <typename _ResultType, typename _Executor>
-  TaskAwaiter<_ResultType, _Executor> await_transform(
-      Task<_ResultType, _Executor>&& task) {
-    return await_transform(
-        TaskAwaiter<_ResultType, _Executor>(std::move(task)));
+  template <typename _ResultType, typename>
+  TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
+    return await_transform(TaskAwaiter<_ResultType>(std::move(task)));
   }
 
   template <typename _Rep, typename _Period>
-  SleepAwaiter await_transform(
-      std::chrono::duration<_Rep, _Period>&& duration) {
-    return await_transform(SleepAwaiter(
+  auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    return await_transform(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration)
-            .count()));
+            .count());
   }
 
   template <typename AwaiterImpl>
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
-    awaiter.install_executor(&executor);
+    // automatically transfer executor
+    awaiter.install_executor(executor);
     return awaiter;
   }
 
@@ -163,6 +163,8 @@ struct TaskPromise<void, Executor> {
     }
   }
 
+  void set_executor(std::shared_ptr<AbstractExecutor> ex) { executor = ex; }
+
  private:
   std::optional<Result<void>> result;
 
@@ -171,7 +173,8 @@ struct TaskPromise<void, Executor> {
 
   std::list<std::function<void(Result<void>)>> completion_callbacks;
 
-  Executor executor;
+  std::shared_ptr<AbstractExecutor> executor =
+      ExecutorManager::get_default_executor();
 
   void notify_callbacks() {
     for (auto& callback : completion_callbacks) {

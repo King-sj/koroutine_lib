@@ -1,20 +1,44 @@
+#define KOROUTINE_DEBUG
 #include <iostream>
 
+#include "koroutine/debug.h"
+#include "koroutine/executors/async_executor.h"
+#include "koroutine/executors/looper_executor.h"
 #include "koroutine/koroutine.h"
-
 using namespace koroutine;
-// 异步(文件) io 读取
-Task<std::string> read_file(const std::string& filename) {
-  // 模拟异步文件读取操作
-  co_await sleep_for(1000);  // 假设读取文件需要 100 毫秒
-  co_return "File content of " + filename;
+Task<void> loop_1() {
+  while (true) {
+    std::cout << "Loop 1 executing..." << std::endl;
+    co_await sleep_for(500);
+  }
+}
+Task<void> loop_2() {
+  while (true) {
+    std::cout << "Loop 2 executing..." << std::endl;
+    co_await sleep_for(1000);
+  }
 }
 
 int main() {
-  std::cout << "=== Koroutine 库 Demo ===" << std::endl << std::endl;
-  auto file_task = read_file("example.txt");
-  std::cout << "Reading file asynchronously..." << std::endl;
-  std::string content = file_task.get_result();
-  std::cout << "File read complete: " << content << std::endl;
+  debug::set_level(debug::Level::Debug);
+  debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
+                          debug::Detail::ThreadId);
+  // create a shared async executor
+  std::cout << "Starting coroutine task..." << std::endl;
+  auto task = []() -> Task<int> {
+    //   switch to async executor
+    // co_await switch_executor(std::make_shared<AsyncExecutor>());
+    LOG_DEBUG("In async executor.");
+    co_await sleep_for(1000);
+    co_return 42;
+  }();
+
+  std::cout << "Running task and blocking for result..." << std::endl;
+  int result = Runtime::block_on(std::move(task));
+  std::cout << "Result: " << result << std::endl;
+
+  //   Start two infinite loops on the same executor
+  auto exec = std::make_shared<LooperExecutor>();
+  Runtime::join_all(loop_1().via(exec), loop_2().via(exec));
   return 0;
 }

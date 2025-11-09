@@ -7,6 +7,7 @@ namespace koroutine {
 
 template <typename R>
 class AwaiterBase {
+ public:
   using ResultType = R;
 
   bool await_ready() const { return false; }
@@ -20,6 +21,13 @@ class AwaiterBase {
     before_resume();
     return _result->get_or_throw();
   }
+
+  void install_executor(std::shared_ptr<AbstractExecutor> executor) {
+    _executor = executor;
+  }
+
+ protected:
+  std::optional<Result<R>> _result{};
 
   void resume(R value) {
     dispatch([this, value]() {
@@ -39,17 +47,12 @@ class AwaiterBase {
     });
   }
 
-  void install_executor(AbstractExecutor* executor) { _executor = executor; }
-
- protected:
-  std::optional<Result<R>> _result{};
-
   virtual void after_suspend() {}
 
   virtual void before_resume() {}
 
  private:
-  AbstractExecutor* _executor = nullptr;
+  std::shared_ptr<AbstractExecutor> _executor = nullptr;
   std::coroutine_handle<> _handle = nullptr;
 
   void dispatch(std::function<void()>&& f) {
@@ -78,6 +81,14 @@ class AwaiterBase<void> {
     _result->get_or_throw();
   }
 
+  void install_executor(std::shared_ptr<AbstractExecutor> executor) {
+    _executor = executor;
+  }
+
+ protected:
+  std::optional<Result<void>> _result{};
+  std::shared_ptr<AbstractExecutor> _executor = nullptr;
+
   void resume() {
     dispatch([this]() {
       _result = Result<void>();
@@ -95,12 +106,6 @@ class AwaiterBase<void> {
       _handle.resume();
     });
   }
-
-  void install_executor(AbstractExecutor* executor) { _executor = executor; }
-
- protected:
-  std::optional<Result<void>> _result{};
-  AbstractExecutor* _executor = nullptr;
 
   virtual void after_suspend() {}
 

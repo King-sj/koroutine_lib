@@ -84,13 +84,13 @@ struct Channel {
   void remove_writer(WriterAwaiter<ValueType>* writer_awaiter) {
     std::lock_guard lock(channel_lock);
     auto size = writer_list.remove(writer_awaiter);
-    // debug("remove writer ", size);
+    LOG_DEBUG("remove writer ", size);
   }
 
   void remove_reader(ReaderAwaiter<ValueType>* reader_awaiter) {
     std::lock_guard lock(channel_lock);
     auto size = reader_list.remove(reader_awaiter);
-    // debug("remove reader ", size);
+    LOG_DEBUG("remove reader ", size);
   }
 
   auto write(ValueType value) {

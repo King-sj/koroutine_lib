@@ -5,11 +5,11 @@
 #include "task_promise.hpp"
 
 namespace koroutine {
-
-template <typename ResultType, typename Executor = NoopExecutor>
+class AbstractExecutor;
+template <typename ResultType>
 class Task {
  public:
-  using promise_type = TaskPromise<ResultType, Executor>;
+  using promise_type = TaskPromise<ResultType>;
   using handle_type = std::coroutine_handle<promise_type>;
 
   explicit Task(handle_type handle) : handle_(handle) {}
@@ -32,9 +32,6 @@ class Task {
       handle_ = std::exchange(other.handle_, {});
     }
     return *this;
-  }
-  auto as_awaiter() {
-    return TaskAwaiter<ResultType, Executor>(std::move(*this));
   }
 
   // blocking for result or throw on exception
@@ -64,14 +61,18 @@ class Task {
     handle_.promise().on_completed([func](auto result) { func(); });
     return *this;
   }
+  Task& via(std::shared_ptr<AbstractExecutor> executor) {
+    handle_.promise().set_executor(executor);
+    return *this;
+  }
 
  private:
   handle_type handle_;
 };
 
-template <typename Executor>
-struct Task<void, Executor> {
-  using promise_type = TaskPromise<void, Executor>;
+template <>
+struct Task<void> {
+  using promise_type = TaskPromise<void>;
   using handle_type = std::coroutine_handle<promise_type>;
   explicit Task(handle_type handle) : handle_(handle) {}
   Task(const Task&) = delete;
@@ -109,8 +110,15 @@ struct Task<void, Executor> {
     handle_.promise().on_completed([func](auto result) { func(); });
     return *this;
   }
+  Task& via(std::shared_ptr<AbstractExecutor> executor) {
+    handle_.promise().set_executor(executor);
+    return *this;
+  }
 
  private:
   handle_type handle_;
 };
 }  // namespace koroutine
+
+// get_return_object is defined in the implementation file to avoid
+// instantiating Task before it is fully defined.

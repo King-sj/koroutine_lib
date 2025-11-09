@@ -1,6 +1,9 @@
 #pragma once
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <queue>
 #include <thread>
 
@@ -44,7 +47,7 @@ class Scheduler {
       lock.unlock();
       executable();
     }
-    // debug("run_loop exit.");
+    LOG_DEBUG("run_loop exit.");
   }
 
  public:
