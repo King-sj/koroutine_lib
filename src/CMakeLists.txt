@@ -1,11 +1,5 @@
-# define source files for the library
-SET(SOURCE_FILES
-    koroutine.cpp
-    task_promise.cpp
-    user_tools.cpp
-    executor_manager.cpp
-)
-
+# find all .cpp files in the src directory
+file(GLOB SOURCE_FILES "*.cpp")
 
 # 生成静态库
 add_library(koroutinelib_static STATIC

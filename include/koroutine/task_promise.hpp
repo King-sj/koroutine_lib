@@ -44,10 +44,10 @@ struct TaskPromise {
   template <typename AwaiterImpl>
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
-  AwaiterImpl await_transform(AwaiterImpl awaiter) {
+  AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
     LOG_TRACE("TaskPromise::await_transform - installing executor");
     awaiter.install_executor(executor.lock());
-    return awaiter;
+    return std::move(awaiter);
   }
 
   void unhandled_exception() {
@@ -128,7 +128,7 @@ struct TaskPromise<void> {
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
     // automatically transfer executor
     awaiter.install_executor(executor.lock());
-    return awaiter;
+    return std::move(awaiter);
   }
 
   void get_result() {

@@ -6,6 +6,7 @@ add_executable(test_unit
     unit/test_basic.cpp
     unit/test_executor.cpp
     unit/test_channel.cpp
+    unit/test_sync.cpp
 )
 
 # 链接库和gtest
