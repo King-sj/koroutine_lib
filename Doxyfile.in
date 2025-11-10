@@ -1,0 +1,50 @@
+PROJECT_NAME           = @PROJECT_NAME@
+OUTPUT_DIRECTORY       = @CMAKE_BINARY_DIR@/docs
+CREATE_SUBDIRS         = NO
+
+OUTPUT_LANGUAGE        = English
+BRIEF_MEMBER_DESC      = YES
+REPEAT_BRIEF           = YES
+ALWAYS_DETAILED_SEC    = NO
+INLINE_INHERITED_MEMB  = YES
+FULL_PATH_NAMES        = YES
+SHORT_NAMES            = NO
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_METHODS  = YES
+
+INPUT                  = @CMAKE_SOURCE_DIR@/include @CMAKE_SOURCE_DIR@/src
+FILE_PATTERNS          = *.h *.hpp *.hh *.cxx *.cpp *.cc
+RECURSIVE              = YES
+
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+
+GENERATE_TREEVIEW      = YES
+
+GENERATE_XML           = YES
+
+# Graphviz options - enable graphs for includes, calls and class diagrams
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 0
+DOT_IMAGE_FORMAT       = svg
+DOT_PATH               =
+DOTFILE_DIRS           =
+INTERACTIVE_SVG        = YES
+
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+INLINE_GRAPH           = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CLASS_DIAGRAMS         = YES
+
+# Reduce clutter: enable grouping and filtering as needed later
+OPTIMIZE_OUTPUT_FOR_C  = NO
+OPTIMIZE_OUTPUT_JAVA   = NO
+
+WARN_IF_UNDOCUMENTED   = NO
+WARN_NO_PARAMDOC       = NO
