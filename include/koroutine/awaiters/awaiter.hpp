@@ -5,14 +5,17 @@
 
 namespace koroutine {
 
-template <typename R>
-class AwaiterBase {
+// CRTP 基类 - 包含公共的 awaiter 逻辑
+template <typename R, typename Derived>
+class AwaiterBaseCRTP {
  public:
   using ResultType = R;
+
   // default constructor
-  AwaiterBase() = default;
+  AwaiterBaseCRTP() = default;
+
   // move constructor
-  AwaiterBase(AwaiterBase&& awaiter) noexcept
+  AwaiterBaseCRTP(AwaiterBaseCRTP&& awaiter) noexcept
       : _executor(std::move(awaiter._executor)),
         _handle(std::move(awaiter._handle)),
         _result(std::move(awaiter._result)) {}
@@ -21,14 +24,7 @@ class AwaiterBase {
 
   void await_suspend(std::coroutine_handle<> handle) {
     this->_handle = handle;
-    after_suspend();
-  }
-
-  R await_resume() {
-    LOG_TRACE("AwaiterBase::await_resume - preparing to resume");
-    before_resume();
-    LOG_TRACE("AwaiterBase::await_resume - returning result");
-    return _result->get_or_throw();
+    static_cast<Derived*>(this)->after_suspend();
   }
 
   void install_executor(std::shared_ptr<AbstractExecutor> executor) {
@@ -40,7 +36,48 @@ class AwaiterBase {
 
  protected:
   std::optional<Result<R>> _result{};
+  std::shared_ptr<AbstractExecutor> _executor = nullptr;
+  std::coroutine_handle<> _handle = nullptr;
 
+  void dispatch(std::function<void()>&& f) {
+    if (_executor) {
+      _executor->execute(std::move(f));
+    } else {
+      LOG_WARN(
+          "AwaiterBase::dispatch - no executor bound, executing on current "
+          "thread.");
+      f();
+    }
+  }
+};
+
+// 通用模板 - 非 void 类型
+template <typename R>
+class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
+  friend class AwaiterBaseCRTP<R, AwaiterBase<R>>;
+
+ public:
+  using Base = AwaiterBaseCRTP<R, AwaiterBase<R>>;
+  using ResultType = R;
+  using Base::_executor;
+  using Base::_handle;
+  using Base::_result;
+  using Base::dispatch;
+
+  // default constructor
+  AwaiterBase() = default;
+
+  // move constructor
+  AwaiterBase(AwaiterBase&& awaiter) noexcept : Base(std::move(awaiter)) {}
+
+  R await_resume() {
+    LOG_TRACE("AwaiterBase::await_resume - preparing to resume");
+    before_resume();
+    LOG_TRACE("AwaiterBase::await_resume - returning result");
+    return _result->get_or_throw();
+  }
+
+ protected:
   void resume(R value) {
     dispatch([this, value]() {
       _result = Result<R>(static_cast<R>(value));
@@ -58,45 +95,34 @@ class AwaiterBase {
       _handle.resume();
     });
   }
-
-  virtual void after_suspend() {}
-
-  virtual void before_resume() {}
-
- private:
-  std::shared_ptr<AbstractExecutor> _executor = nullptr;
-  std::coroutine_handle<> _handle = nullptr;
-
-  void dispatch(std::function<void()>&& f) {
-    if (_executor) {
-      _executor->execute(std::move(f));
-    } else {
-      LOG_WARN(
-          "AwaiterBase::dispatch - no executor bound, executing on current "
-          "thread.");
-      f();
-    }
+  virtual void after_suspend() {
+    LOG_INFO(
+        "AwaiterBase::after_suspend - default implementation does nothing.");
+  }
+  virtual void before_resume() {
+    LOG_INFO(
+        "AwaiterBase::before_resume - default implementation does nothing.");
   }
 };
 
+// void 类型的特化
 template <>
-class AwaiterBase<void> {
+class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
+  friend class AwaiterBaseCRTP<void, AwaiterBase<void>>;
+
  public:
+  using Base = AwaiterBaseCRTP<void, AwaiterBase<void>>;
   using ResultType = void;
+  using Base::_executor;
+  using Base::_handle;
+  using Base::_result;
+  using Base::dispatch;
+
   // default constructor
   AwaiterBase() = default;
-  //   move constructor
-  AwaiterBase(AwaiterBase&& awaiter) noexcept
-      : _executor(std::move(awaiter._executor)),
-        _handle(std::move(awaiter._handle)),
-        _result(std::move(awaiter._result)) {}
 
-  bool await_ready() const { return false; }
-
-  void await_suspend(std::coroutine_handle<> handle) {
-    this->_handle = handle;
-    after_suspend();
-  }
+  // move constructor
+  AwaiterBase(AwaiterBase&& awaiter) noexcept : Base(std::move(awaiter)) {}
 
   void await_resume() {
     LOG_TRACE("AwaiterBase<void>::await_resume - preparing to resume");
@@ -105,17 +131,7 @@ class AwaiterBase<void> {
     _result->get_or_throw();
   }
 
-  void install_executor(std::shared_ptr<AbstractExecutor> executor) {
-    if (!executor) {
-      LOG_WARN("AwaiterBase::install_executor - null executor provided");
-    }
-    _executor = executor;
-  }
-
  protected:
-  std::optional<Result<void>> _result{};
-  std::shared_ptr<AbstractExecutor> _executor = nullptr;
-
   void resume() {
     dispatch([this]() {
       _result = Result<void>();
@@ -133,24 +149,13 @@ class AwaiterBase<void> {
       _handle.resume();
     });
   }
-
-  virtual void after_suspend() {}
-
-  virtual void before_resume() {}
-
- private:
-  std::coroutine_handle<> _handle = nullptr;
-
-  void dispatch(std::function<void()>&& f) {
-    if (_executor) {
-      _executor->execute(std::move(f));
-    } else {
-      LOG_WARN(
-          "AwaiterBase<void>::dispatch - no executor bound, executing on "
-          "current "
-          "thread.");
-      f();
-    }
+  virtual void after_suspend() {
+    LOG_INFO(
+        "AwaiterBase::after_suspend - default implementation does nothing.");
+  }
+  virtual void before_resume() {
+    LOG_INFO(
+        "AwaiterBase::before_resume - default implementation does nothing.");
   }
 };
 

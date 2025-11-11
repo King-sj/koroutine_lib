@@ -6,25 +6,29 @@
 
 namespace koroutine {
 class AbstractExecutor;
-template <typename ResultType>
-class Task {
+
+// CRTP 基类 - 包含公共的任务管理逻辑
+template <typename ResultType, typename Derived>
+class TaskBase {
  public:
   using promise_type = TaskPromise<ResultType>;
   using handle_type = std::coroutine_handle<promise_type>;
 
-  explicit Task(handle_type handle) : handle_(handle) {}
-  ~Task() {
+  explicit TaskBase(handle_type handle) : handle_(handle) {}
+
+  ~TaskBase() {
     if (handle_) {
       handle_.destroy();
     }
   }
 
-  Task(const Task&) = delete;
-  Task& operator=(const Task&) = delete;
+  TaskBase(const TaskBase&) = delete;
+  TaskBase& operator=(const TaskBase&) = delete;
 
-  Task(Task&& task) noexcept : handle_(std::exchange(task.handle_, {})) {}
+  TaskBase(TaskBase&& task) noexcept
+      : handle_(std::exchange(task.handle_, {})) {}
 
-  Task& operator=(Task&& other) noexcept {
+  TaskBase& operator=(TaskBase&& other) noexcept {
     if (this != &other) {
       if (handle_) {
         handle_.destroy();
@@ -33,6 +37,48 @@ class Task {
     }
     return *this;
   }
+
+  Derived& catching(std::function<void(std::exception&)>&& func) {
+    handle_.promise().on_completed([func](auto result) {
+      try {
+        LOG_TRACE("Task::catching - checking for exception");
+        result.get_or_throw();
+      } catch (std::exception& e) {
+        LOG_TRACE("Task::catching - exception caught, invoking callback");
+        func(e);
+      }
+    });
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& finally(std::function<void()>&& func) {
+    handle_.promise().on_completed([func](auto result) {
+      LOG_TRACE("Task::finally - invoking finally callback");
+      func();
+    });
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& via(std::shared_ptr<AbstractExecutor> executor) {
+    LOG_TRACE("Task::via - setting executor for task");
+    handle_.promise().set_executor(executor);
+    return static_cast<Derived&>(*this);
+  }
+
+ protected:
+  handle_type handle_;
+};
+
+// 通用模板 - 非 void 类型
+template <typename ResultType>
+class Task : public TaskBase<ResultType, Task<ResultType>> {
+ public:
+  using Base = TaskBase<ResultType, Task<ResultType>>;
+  using promise_type = typename Base::promise_type;
+  using handle_type = typename Base::handle_type;
+  using Base::handle_;
+
+  explicit Task(handle_type handle) : Base(handle) {}
 
   // blocking for result or throw on exception
   ResultType get_result() {
@@ -52,48 +98,19 @@ class Task {
     });
     return *this;
   }
-  Task& catching(std::function<void(std::exception&)>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      try {
-        LOG_TRACE("Task::catching - checking for exception");
-        result.get_or_throw();
-      } catch (std::exception& e) {
-        LOG_TRACE("Task::catching - exception caught, invoking callback");
-        func(e);
-      }
-    });
-    return *this;
-  }
-  Task& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      LOG_TRACE("Task::finally - invoking finally callback");
-      func();
-    });
-    return *this;
-  }
-  Task& via(std::shared_ptr<AbstractExecutor> executor) {
-    LOG_TRACE("Task::via - setting executor for task");
-    handle_.promise().set_executor(executor);
-    return *this;
-  }
-
- private:
-  handle_type handle_;
 };
 
+// void 类型的特化
 template <>
-struct Task<void> {
-  using promise_type = TaskPromise<void>;
-  using handle_type = std::coroutine_handle<promise_type>;
-  explicit Task(handle_type handle) : handle_(handle) {}
-  Task(const Task&) = delete;
-  Task& operator=(const Task&) = delete;
-  Task(Task&& task) noexcept : handle_(std::exchange(task.handle_, {})) {}
-  ~Task() {
-    if (handle_) {
-      handle_.destroy();
-    }
-  }
+class Task<void> : public TaskBase<void, Task<void>> {
+ public:
+  using Base = TaskBase<void, Task<void>>;
+  using promise_type = typename Base::promise_type;
+  using handle_type = typename Base::handle_type;
+  using Base::handle_;
+
+  explicit Task(handle_type handle) : Base(handle) {}
+
   void get_result() { handle_.promise().get_result(); }
 
   Task& then(std::function<void()>&& func) {
@@ -103,41 +120,27 @@ struct Task<void> {
         result.get_or_throw();
         func();
       } catch (std::exception& e) {
-        // ignore.
         LOG_WARN("Task<void>::then - exception in then callback: ", e.what());
+        // ignore.
       }
     });
     return *this;
   }
-  Task& catching(std::function<void(std::exception&)>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      try {
-        LOG_TRACE("Task<void>::catching - checking for exception");
-        result.get_or_throw();
-      } catch (std::exception& e) {
-        LOG_TRACE("Task<void>::catching - exception caught, invoking callback");
-        func(e);
-      }
-    });
-    return *this;
-  }
-  Task& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      LOG_TRACE("Task<void>::finally - invoking finally callback");
-      func();
-    });
-    return *this;
-  }
-  Task& via(std::shared_ptr<AbstractExecutor> executor) {
-    LOG_TRACE("Task<void>::via - setting executor for task");
-    handle_.promise().set_executor(executor);
-    return *this;
-  }
-
- private:
-  handle_type handle_;
 };
-}  // namespace koroutine
 
-// get_return_object is defined in the implementation file to avoid
-// instantiating Task before it is fully defined.
+// get_return_object_impl 的实现必须在 Task 完全定义之后
+// 因为它返回 Task 对象（CRTP 模式）
+template <typename ResultType>
+inline Task<ResultType> TaskPromise<ResultType>::get_return_object_impl() {
+  LOG_TRACE("TaskPromise::get_return_object_impl - creating Task<ResultType>");
+  return Task<ResultType>{
+      std::coroutine_handle<TaskPromise<ResultType>>::from_promise(*this)};
+}
+
+inline Task<void> TaskPromise<void>::get_return_object_impl() {
+  LOG_TRACE("TaskPromise<void>::get_return_object_impl - creating Task<void>");
+  return Task<void>{
+      std::coroutine_handle<TaskPromise<void>>::from_promise(*this)};
+}
+
+}  // namespace koroutine

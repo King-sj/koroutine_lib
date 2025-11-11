@@ -1,5 +1,6 @@
 .vscode/
 *.code-workspace
+output/
 
 # Prerequisites
 *.d
