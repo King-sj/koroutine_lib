@@ -1,4 +1,5 @@
-#define KOROUTINE_DEMO
+#define KOROUTINE_DEBUG
+#include "koroutine/executors/new_thread_executor.h"
 #include "koroutine/koroutine.h"
 using namespace koroutine;
 using namespace std::chrono_literals;
@@ -20,7 +21,7 @@ Task<int> simple_task() {
   LOG_DEBUG("simple_task - started");
   // result2 == 2
   auto result2 = co_await simple_task2();
-
+  LOG_DEBUG("simple_task - simple_task2 completed with result: ", result2);
   // result3 == 3
   auto result3 = co_await simple_task3();
   LOG_DEBUG("simple_task - completed with results: ", result2, ", ", result3);
@@ -29,9 +30,11 @@ Task<int> simple_task() {
 
 int main() {
   LOG_DEBUG("Add Demo Started");
+  std::cout << "Starting simple_task..." << std::endl;
   debug::set_level(debug::Level::Trace);
   debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                           debug::Detail::ThreadId | debug::Detail::FileLine);
+  LOG_DEBUG("creating simple_task");
   auto task = simple_task();
   task.then([](int result) {
         std::cout << "Task completed with result: " << result << std::endl;
@@ -41,7 +44,10 @@ int main() {
       })
       .finally(
           []() { std::cout << "Task has finished execution." << std::endl; });
-  Runtime::block_on(std::move(task));
+  std::shared_ptr<AbstractExecutor> executor =
+      std::make_shared<NewThreadExecutor>();
+  LOG_DEBUG("Submitting task to NewThreadExecutor");
+  Runtime::block_on(std::move(task.via(executor)));
   LOG_DEBUG("Add Demo Finished");
   return 0;
 }

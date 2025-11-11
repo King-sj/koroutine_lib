@@ -26,6 +26,7 @@ class Runtime {
    */
   template <typename ResultType>
   static ResultType block_on(Task<ResultType>&& task) {
+    LOG_TRACE("Runtime::block_on - blocking on task for result");
     return task.get_result();
   }
 

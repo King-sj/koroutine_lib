@@ -24,20 +24,27 @@ class Task;
 
 template <typename ResultType>
 struct TaskPromise {
-  auto initial_suspend() { return DispatchAwaiter{executor.lock()}; }
+  auto initial_suspend() {
+    LOG_TRACE("TaskPromise::initial_suspend - suspending initially");
+    return std::suspend_always{};
+  }
   auto final_suspend() noexcept { return std::suspend_always{}; }
   Task<ResultType> get_return_object() {
+    LOG_TRACE("TaskPromise::get_return_object - creating Task<ResultType>");
     return Task<ResultType>{
         std::coroutine_handle<TaskPromise<ResultType>>::from_promise(*this)};
   }
 
   template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
+    LOG_TRACE("TaskPromise::await_transform - transforming Task<_ResultType>");
     return TaskAwaiter<_ResultType>{std::move(task)};
   }
 
   template <typename _Rep, typename _Period>
   auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    LOG_TRACE("TaskPromise::await_transform - transforming sleep duration: ",
+              duration.count());
     return await_transform(SleepAwaiter(duration.count()));
   }
 
@@ -58,6 +65,7 @@ struct TaskPromise {
   }
 
   void return_value(ResultType value) {
+    LOG_TRACE("TaskPromise::return_value - returning value");
     std::lock_guard lock(completion_lock);
     result = Result<ResultType>(std::move(value));
     completion.notify_all();
@@ -66,10 +74,16 @@ struct TaskPromise {
 
   // blocking for result or throw on exception
   ResultType get_result() {
+    LOG_TRACE("TaskPromise::get_result - waiting for result");
     std::unique_lock lock(completion_lock);
+    LOG_TRACE("TaskPromise::get_result - acquired lock");
     if (!result.has_value()) {
+      LOG_TRACE("TaskPromise::get_result - waiting on condition variable");
+      //   TODO: 尝试改成 async_condition_variable 以避免阻塞（单线程情况）
       completion.wait(lock);
+      LOG_TRACE("TaskPromise::get_result - woke up from wait");
     }
+    LOG_TRACE("TaskPromise::get_result - returning result");
     return result->get_or_throw();
   }
 
@@ -106,7 +120,10 @@ struct TaskPromise {
 
 template <>
 struct TaskPromise<void> {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{executor.lock()}; }
+  auto initial_suspend() {
+    LOG_TRACE("TaskPromise<void>::initial_suspend - suspending initially");
+    return std::suspend_always{};
+  }
   auto final_suspend() noexcept { return std::suspend_always{}; }
   Task<void> get_return_object();
 
@@ -114,11 +131,16 @@ struct TaskPromise<void> {
 
   template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
+    LOG_TRACE(
+        "TaskPromise<void>::await_transform - transforming Task<_ResultType>");
     return TaskAwaiter<_ResultType>{std::move(task)};
   }
 
   template <typename _Rep, typename _Period>
   auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    LOG_TRACE(
+        "TaskPromise<void>::await_transform - transforming sleep duration: ",
+        duration.count());
     return await_transform(SleepAwaiter(duration));
   }
 
@@ -126,6 +148,7 @@ struct TaskPromise<void> {
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
+    LOG_TRACE("TaskPromise<void>::await_transform - installing executor");
     // automatically transfer executor
     awaiter.install_executor(executor.lock());
     return std::move(awaiter);
@@ -133,10 +156,16 @@ struct TaskPromise<void> {
 
   void get_result() {
     // blocking for result or throw on exception
+    LOG_TRACE("TaskPromise<void>::get_result - waiting for result");
     std::unique_lock lock(completion_lock);
+    LOG_TRACE("TaskPromise<void>::get_result - acquired lock");
     if (!result.has_value()) {
+      LOG_TRACE(
+          "TaskPromise<void>::get_result - waiting on condition variable");
       completion.wait(lock);
+      LOG_TRACE("TaskPromise<void>::get_result - woke up from wait");
     }
+    LOG_TRACE("TaskPromise<void>::get_result - returning result");
     result->get_or_throw();
   }
 
@@ -148,6 +177,7 @@ struct TaskPromise<void> {
   }
 
   void return_void() {
+    LOG_TRACE("TaskPromise<void>::return_void - returning void");
     std::lock_guard lock(completion_lock);
     result = Result<void>();
     completion.notify_all();

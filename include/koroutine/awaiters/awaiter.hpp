@@ -25,7 +25,9 @@ class AwaiterBase {
   }
 
   R await_resume() {
+    LOG_TRACE("AwaiterBase::await_resume - preparing to resume");
     before_resume();
+    LOG_TRACE("AwaiterBase::await_resume - returning result");
     return _result->get_or_throw();
   }
 
@@ -69,6 +71,9 @@ class AwaiterBase {
     if (_executor) {
       _executor->execute(std::move(f));
     } else {
+      LOG_WARN(
+          "AwaiterBase::dispatch - no executor bound, executing on current "
+          "thread.");
       f();
     }
   }
@@ -94,7 +99,9 @@ class AwaiterBase<void> {
   }
 
   void await_resume() {
+    LOG_TRACE("AwaiterBase<void>::await_resume - preparing to resume");
     before_resume();
+    LOG_TRACE("AwaiterBase<void>::await_resume - returning result : void");
     _result->get_or_throw();
   }
 
@@ -138,6 +145,10 @@ class AwaiterBase<void> {
     if (_executor) {
       _executor->execute(std::move(f));
     } else {
+      LOG_WARN(
+          "AwaiterBase<void>::dispatch - no executor bound, executing on "
+          "current "
+          "thread.");
       f();
     }
   }

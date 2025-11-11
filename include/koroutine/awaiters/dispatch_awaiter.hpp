@@ -12,6 +12,7 @@ struct DispatchAwaiter {
 
   void await_suspend(std::coroutine_handle<> handle) const {
     if (_executor) {
+      LOG_TRACE("DispatchAwaiter: resuming coroutine on specified executor.");
       _executor->execute([handle]() { handle.resume(); });
     } else {
       // no executor bound: resume immediately on current thread
@@ -21,7 +22,7 @@ struct DispatchAwaiter {
     }
   }
 
-  void await_resume() {}
+  void await_resume() { LOG_TRACE("DispatchAwaiter: await_resume called."); }
 
  private:
   std::shared_ptr<AbstractExecutor> _executor;

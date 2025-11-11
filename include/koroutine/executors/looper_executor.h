@@ -37,7 +37,9 @@ class LooperExecutor : public AbstractExecutor {
 
   void run_loop() {
     while (is_active_ || !tasks_.empty() || !delayed_tasks_.empty()) {
+      LOG_TRACE("LooperExecutor::run_loop - waiting for tasks");
       std::unique_lock lock(mutex_);
+      LOG_TRACE("LooperExecutor::run_loop - acquired lock");
 
       if (tasks_.empty() && delayed_tasks_.empty()) {
         cv_.wait(lock);
@@ -54,6 +56,9 @@ class LooperExecutor : public AbstractExecutor {
       // Move ready delayed tasks to the immediate queue
       auto now = Clock::now();
       while (!delayed_tasks_.empty() && delayed_tasks_.top().first <= now) {
+        LOG_TRACE(
+            "LooperExecutor::run_loop - moving delayed task to immediate "
+            "queue");
         tasks_.push(
             std::move(const_cast<TaskPair&>(delayed_tasks_.top()).second));
         delayed_tasks_.pop();
@@ -61,6 +66,7 @@ class LooperExecutor : public AbstractExecutor {
 
       // Execute immediate tasks
       if (!tasks_.empty()) {
+        LOG_TRACE("LooperExecutor::run_loop - executing immediate task");
         auto task = std::move(tasks_.front());
         tasks_.pop();
         lock.unlock();
@@ -80,6 +86,7 @@ class LooperExecutor : public AbstractExecutor {
   }
 
   void execute(std::function<void()>&& func) override {
+    LOG_TRACE("LooperExecutor::execute - adding task to queue");
     {
       std::unique_lock lock(mutex_);
       LOG_DEBUG("LooperExecutor::execute called.");
@@ -91,8 +98,13 @@ class LooperExecutor : public AbstractExecutor {
   }
 
   void execute_delayed(std::function<void()>&& func, long long ms) override {
+    LOG_TRACE(
+        "LooperExecutor::execute_delayed - adding delayed task to queue with "
+        "delay: ",
+        ms);
     {
       std::unique_lock lock(mutex_);
+      LOG_DEBUG("LooperExecutor::execute_delayed called.", ms);
       if (is_active_) {
         auto time_point = Clock::now() + std::chrono::milliseconds(ms);
         delayed_tasks_.push({time_point, std::move(func)});
@@ -102,6 +114,7 @@ class LooperExecutor : public AbstractExecutor {
   }
 
   void shutdown() {
+    LOG_TRACE("LooperExecutor::shutdown - shutting down executor");
     is_active_ = false;
     cv_.notify_all();
   }

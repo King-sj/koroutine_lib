@@ -35,13 +35,18 @@ class Task {
   }
 
   // blocking for result or throw on exception
-  ResultType get_result() { return handle_.promise().get_result(); }
+  ResultType get_result() {
+    LOG_TRACE("Task::get_result - getting result from promise");
+    return handle_.promise().get_result();
+  }
 
   Task& then(std::function<void(ResultType)>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
+        LOG_TRACE("Task::then - invoking then callback");
         func(result.get_or_throw());
       } catch (std::exception& e) {
+        LOG_WARN("Task::then - exception in then callback: ", e.what());
         // ignore.
       }
     });
@@ -50,18 +55,24 @@ class Task {
   Task& catching(std::function<void(std::exception&)>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
+        LOG_TRACE("Task::catching - checking for exception");
         result.get_or_throw();
       } catch (std::exception& e) {
+        LOG_TRACE("Task::catching - exception caught, invoking callback");
         func(e);
       }
     });
     return *this;
   }
   Task& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) { func(); });
+    handle_.promise().on_completed([func](auto result) {
+      LOG_TRACE("Task::finally - invoking finally callback");
+      func();
+    });
     return *this;
   }
   Task& via(std::shared_ptr<AbstractExecutor> executor) {
+    LOG_TRACE("Task::via - setting executor for task");
     handle_.promise().set_executor(executor);
     return *this;
   }
@@ -88,10 +99,12 @@ struct Task<void> {
   Task& then(std::function<void()>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
+        LOG_TRACE("Task<void>::then - invoking then callback");
         result.get_or_throw();
         func();
       } catch (std::exception& e) {
         // ignore.
+        LOG_WARN("Task<void>::then - exception in then callback: ", e.what());
       }
     });
     return *this;
@@ -99,18 +112,24 @@ struct Task<void> {
   Task& catching(std::function<void(std::exception&)>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
+        LOG_TRACE("Task<void>::catching - checking for exception");
         result.get_or_throw();
       } catch (std::exception& e) {
+        LOG_TRACE("Task<void>::catching - exception caught, invoking callback");
         func(e);
       }
     });
     return *this;
   }
   Task& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) { func(); });
+    handle_.promise().on_completed([func](auto result) {
+      LOG_TRACE("Task<void>::finally - invoking finally callback");
+      func();
+    });
     return *this;
   }
   Task& via(std::shared_ptr<AbstractExecutor> executor) {
+    LOG_TRACE("Task<void>::via - setting executor for task");
     handle_.promise().set_executor(executor);
     return *this;
   }

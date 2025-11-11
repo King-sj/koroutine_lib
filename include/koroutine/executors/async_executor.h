@@ -8,6 +8,7 @@ namespace koroutine {
 class AsyncExecutor : public AbstractExecutor {
  public:
   void execute(std::function<void()>&& func) override {
+    LOG_TRACE("AsyncExecutor:: Trying to lock future_lock for execute");
     std::unique_lock lock(future_lock);
     LOG_DEBUG("AsyncExecutor::execute called.");
     auto id = nextId++;
@@ -22,6 +23,8 @@ class AsyncExecutor : public AbstractExecutor {
   }
 
   void execute_delayed(std::function<void()>&& func, long long ms) override {
+    LOG_TRACE(
+        "AsyncExecutor::execute_delayed - Trying to execute after delay: ", ms);
     std::unique_lock lock(future_lock);
     LOG_DEBUG("AsyncExecutor::execute_delayed called.", ms);
     auto id = nextId++;
