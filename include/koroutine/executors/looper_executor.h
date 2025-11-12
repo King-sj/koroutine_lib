@@ -42,6 +42,7 @@ class LooperExecutor : public AbstractExecutor {
       LOG_TRACE("LooperExecutor::run_loop - acquired lock");
 
       if (tasks_.empty() && delayed_tasks_.empty()) {
+        LOG_INFO("LooperExecutor::run_loop - no tasks available, waiting...");
         cv_.wait(lock);
         if (!is_active_ && tasks_.empty() && delayed_tasks_.empty()) break;
       }
@@ -49,6 +50,10 @@ class LooperExecutor : public AbstractExecutor {
       if (tasks_.empty()) {
         auto wait_time = delayed_tasks_.top().first - Clock::now();
         if (wait_time > Clock::duration::zero()) {
+          LOG_TRACE(
+              "LooperExecutor::run_loop - waiting for delayed task to be "
+              "ready");
+          //   TODO: 如果在等待期间有新任务到来，应该提前唤醒
           cv_.wait_for(lock, wait_time);
         }
       }

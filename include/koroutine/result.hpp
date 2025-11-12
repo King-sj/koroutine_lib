@@ -1,6 +1,7 @@
 #pragma once
 #include <exception>
 
+#include "koroutine/debug.h"
 namespace koroutine {
 // define unintialized exception
 class UninitializedResultException : public std::exception {

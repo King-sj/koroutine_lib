@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../coroutine_common.h"
-#include "../executors/executor.h"
-#include "../schedulers/scheduler.hpp"
+#include "../schedulers/scheduler.h"
+#include "../schedulers/timer_scheduler.hpp"
 #include "awaiter.hpp"
 
 namespace koroutine {
@@ -18,11 +18,11 @@ struct SleepAwaiter : public AwaiterBase<void> {
 
  protected:
   void after_suspend() override {
-    if (_executor) {
-      // use executor's delayed execution if available
-      _executor->execute_delayed([this] { this->resume(); }, _duration);
+    if (_scheduler) {
+      // use scheduler's delayed execution if available
+      _scheduler->schedule([this] { this->resume(); }, _duration);
     } else {
-      static Scheduler scheduler;
+      static TimerScheduler scheduler;
       scheduler.schedule([this] { this->resume(); }, _duration);
     }
   }

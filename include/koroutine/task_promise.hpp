@@ -7,18 +7,17 @@
 #include "awaiters/awaiter.hpp"
 #include "awaiters/dispatch_awaiter.hpp"
 #include "awaiters/sleep_awaiter.hpp"
-#include "awaiters/switch_executor.hpp"
 #include "awaiters/task_awaiter.hpp"
 #include "coroutine_common.h"
-#include "executor_manager.h"
-#include "executors/executor.h"
+#include "scheduler_manager.h"
 
 namespace koroutine {
 
 template <typename AwaiterImpl, typename R>
 concept AwaiterImplRestriction =
     std::is_base_of<AwaiterBase<R>, AwaiterImpl>::value;
-
+template <typename ResultType, typename Derived>
+class TaskBase;
 template <typename ResultType>
 class Task;
 
@@ -30,7 +29,11 @@ struct TaskPromiseBase {
     return std::suspend_always{};
   }
 
-  auto final_suspend() noexcept { return std::suspend_always{}; }
+  auto final_suspend() noexcept {
+    // 在 ~task 中 调用 handle_.destroy()
+    LOG_TRACE("TaskPromise::final_suspend - final suspend point");
+    return std::suspend_always{};
+  }
 
   template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
@@ -49,8 +52,8 @@ struct TaskPromiseBase {
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
-    LOG_TRACE("TaskPromise::await_transform - installing executor");
-    awaiter.install_executor(executor.lock());
+    LOG_TRACE("TaskPromise::await_transform - installing scheduler");
+    awaiter.install_scheduler(scheduler.lock());
     return std::move(awaiter);
   }
 
@@ -64,14 +67,19 @@ struct TaskPromiseBase {
   void on_completed(std::function<void(Result<ResultType>)>&& func) {
     std::unique_lock lock(completion_lock);
     if (result.has_value()) {
+      LOG_TRACE(
+          "TaskPromise::on_completed - task already completed, invoking "
+          "callback immediately");
       lock.unlock();
       func(*result);
     } else {
+      LOG_TRACE(
+          "TaskPromise::on_completed - task not completed, storing callback");
       completion_callbacks.push_back(std::move(func));
     }
   }
 
-  void set_executor(std::shared_ptr<AbstractExecutor> ex) { executor = ex; }
+  void set_scheduler(std::shared_ptr<AbstractScheduler> ex) { scheduler = ex; }
 
   // CRTP: 通过派生类访问 get_return_object
   Task<ResultType> get_return_object() {
@@ -79,19 +87,23 @@ struct TaskPromiseBase {
   }
 
  protected:
+  friend class TaskBase<ResultType, Task<ResultType>>;
+
   std::optional<Result<ResultType>> result;
   std::mutex completion_lock;
   std::condition_variable completion;
   std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
-  std::weak_ptr<AbstractExecutor> executor =
-      ExecutorManager::get_default_executor();
+  std::weak_ptr<AbstractScheduler> scheduler =
+      SchedulerManager::get_default_scheduler();
 
   void notify_callbacks() {
+    LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks");
     for (auto& callback : completion_callbacks) {
       callback(*result);
     }
     completion_callbacks.clear();
   }
+  std::weak_ptr<AbstractScheduler> get_scheduler() { return scheduler; }
 };
 
 // 通用模板 - 非 void 类型

@@ -1,14 +1,14 @@
 #pragma once
 
+#include <atomic>
 #include <future>
 #include <memory>
 #include <thread>
 
 #include "coroutine_common.h"
-#include "executors/async_executor.h"
-#include "executors/looper_executor.h"
+#include "scheduler_manager.h"
+#include "schedulers/scheduler.h"
 #include "task.hpp"
-
 namespace koroutine {
 
 /**
@@ -17,52 +17,49 @@ namespace koroutine {
  */
 class Runtime {
  public:
-  /**
-   * @brief 在默认执行器上运行一个 Task 并阻塞等待结果
-   * @tparam ResultType 返回值类型
-   * @tparam Executor 执行器类型
-   * @param task 要执行的任务
-   * @return 任务的执行结果
-   */
   template <typename ResultType>
   static ResultType block_on(Task<ResultType>&& task) {
     LOG_TRACE("Runtime::block_on - blocking on task for result");
-    return task.get_result();
+    std::optional<ResultType> result;
+    std::exception_ptr exception_ptr;
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::atomic<bool> is_completed = false;
+
+    task.then([&](ResultType res) {
+          LOG_TRACE("Runtime::block_on - task completed successfully");
+          std::lock_guard lock(mtx);
+          result = std::move(res);
+          is_completed = true;
+          cv.notify_one();
+        })
+        .catching([&](std::exception& e) {
+          LOG_TRACE("Runtime::block_on - task completed with exception");
+          std::lock_guard lock(mtx);
+          exception_ptr = std::make_exception_ptr(e);
+          is_completed = true;
+          cv.notify_one();
+        });
+    task.start();
+    LOG_TRACE("Runtime::block_on - waiting for task to complete");
+    std::unique_lock lock(mtx);
+    cv.wait(lock, [&is_completed]() { return is_completed.load(); });
+    if (exception_ptr) {
+      LOG_TRACE("Runtime::block_on - rethrowing exception from task");
+      std::rethrow_exception(exception_ptr);
+    }
+    LOG_TRACE("Runtime::block_on - returning result from task");
+    return *result;
   }
 
-  /**
-   * @brief 在默认执行器上运行一个 Task(void) 并阻塞等待完成
-   * @tparam Executor 执行器类型
-   * @param task 要执行的任务
-   */
-  static void block_on(Task<void>&& task) { task.get_result(); }
-
-  /**
-   * @brief 使用 LooperExecutor 运行协程主函数
-   * 适合需要事件循环的场景
-   * @tparam Func 协程函数类型
-   * @param func 协程函数
-   * @return 协程执行结果
-   */
-  template <typename Func>
-    requires std::is_invocable_v<Func>
-  static auto run_with_looper(Func&& func) -> decltype(func().get_result()) {
-    auto task = func();
-    return task.get_result();
-  }
-
-  /**
-   * @brief 使用 AsyncExecutor 运行协程主函数
-   * 适合并发执行的场景
-   * @tparam Func 协程函数类型
-   * @param func 协程函数
-   * @return 协程执行结果
-   */
-  template <typename Func>
-    requires std::is_invocable_v<Func>
-  static auto run_async(Func&& func) -> decltype(func().get_result()) {
-    auto task = func();
-    return task.get_result();
+  static void block_on(Task<void>&& task) {
+    LOG_TRACE("Runtime::block_on - blocking on void task for completion");
+    // wrap a Task<int> around Task<void>
+    auto wrapper_task = [&task]() -> Task<int> {
+      co_await std::move(task);
+      co_return 0;
+    }();
+    block_on(std::move(wrapper_task));
   }
 
   /**
@@ -72,15 +69,17 @@ class Runtime {
    */
   template <typename... Tasks>
   static void join_all(Tasks&&... tasks) {
-    (tasks.get_result(), ...);
+    // (tasks.get_result(), ...);
+    (tasks.start(), ...);
+    (block_on(std::move(tasks)), ...);
   }
 };
 
 /**
  * @brief async_main 宏,简化协程主函数的编写
- * 用法: ASYNC_MAIN(MyAsyncExecutor) { co_return 0; }
+ * 用法: ASYNC_MAIN(MyAsyncScheduler) { co_return 0; }
  */
-#define ASYNC_MAIN(ExecutorType)                                     \
+#define ASYNC_MAIN(SchedulerType)                                    \
   Task<int> async_main_impl();                                       \
   int main() {                                                       \
     try {                                                            \
@@ -93,7 +92,7 @@ class Runtime {
   Task<int> async_main_impl()
 
 /**
- * @brief 简化版 async_main,使用默认的 AsyncExecutor
+ * @brief 简化版 async_main,使用默认的调度器
  */
 #define ASYNC_MAIN_DEFAULT()                                         \
   Task<int> async_main_impl();                                       \

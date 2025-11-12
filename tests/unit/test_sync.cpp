@@ -44,8 +44,6 @@ TEST(SyncTest, SyncTest_BasicConditionVariable_Test) {
 }
 
 TEST(SyncTest, AsyncMutexLocking) {
-  auto exec = std::make_shared<koroutine::AsyncExecutor>();
-
   AsyncMutex mtx;
   int counter = 0;
   const int increments = 200;
@@ -70,17 +68,12 @@ TEST(SyncTest, AsyncMutexLocking) {
     }
   }();
 
-  t1.via(exec);
-  t2.via(exec);
-
   Runtime::join_all(std::move(t1), std::move(t2));
 
   EXPECT_EQ(counter, increments * 2);
 }
 
 TEST(SyncTest, ConditionVariableNotifyOne) {
-  auto exec = std::make_shared<koroutine::AsyncExecutor>();
-
   AsyncMutex mtx;
   AsyncConditionVariable cv;
   int shared = 0;
@@ -103,9 +96,6 @@ TEST(SyncTest, ConditionVariableNotifyOne) {
     cv.notify_one();
     mtx.unlock();
   }();
-
-  waiter.via(exec);
-  notifier.via(exec);
 
   Runtime::join_all(std::move(waiter), std::move(notifier));
 

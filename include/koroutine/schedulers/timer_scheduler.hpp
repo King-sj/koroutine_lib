@@ -13,7 +13,7 @@ namespace koroutine {
 /**
  * @brief 定时任务调度器
  */
-class Scheduler {
+class TimerScheduler {
   std::condition_variable queue_condition;
   std::mutex queue_lock;
   std::priority_queue<DelayedExecutable, std::vector<DelayedExecutable>,
@@ -51,11 +51,11 @@ class Scheduler {
   }
 
  public:
-  Scheduler() {
+  TimerScheduler() {
     is_active.store(true, std::memory_order_relaxed);
-    work_thread = std::thread(&Scheduler::run_loop, this);
+    work_thread = std::thread(&TimerScheduler::run_loop, this);
   }
-  ~Scheduler() {
+  ~TimerScheduler() {
     shutdown(false);
     join();
   }

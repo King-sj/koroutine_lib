@@ -1,11 +1,11 @@
 #pragma once
 
 #include "coroutine_common.h"
-#include "executors/noop_executor.h"
+#include "scheduler_manager.h"
 #include "task_promise.hpp"
 
 namespace koroutine {
-class AbstractExecutor;
+class AbstractScheduler;
 
 // CRTP 基类 - 包含公共的任务管理逻辑
 template <typename ResultType, typename Derived>
@@ -59,10 +59,22 @@ class TaskBase {
     return static_cast<Derived&>(*this);
   }
 
-  Derived& via(std::shared_ptr<AbstractExecutor> executor) {
-    LOG_TRACE("Task::via - setting executor for task");
-    handle_.promise().set_executor(executor);
-    return static_cast<Derived&>(*this);
+  void start() {
+    std::shared_ptr<AbstractScheduler> scheduler =
+        handle_.promise().get_scheduler().lock();
+    if (!scheduler) {
+      LOG_WARN("Task::start - no scheduler set, using default scheduler");
+      scheduler = SchedulerManager::get_default_scheduler();
+    }
+    LOG_TRACE("Task::start - starting task with scheduler");
+    handle_.promise().set_scheduler(scheduler);
+    scheduler->schedule(
+        [h = handle_]() {
+          LOG_TRACE("Task::start - resuming coroutine");
+          h.resume();
+          LOG_TRACE("Task::start - coroutine resumed");
+        },
+        0);
   }
 
  protected:

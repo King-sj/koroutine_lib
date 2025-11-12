@@ -59,7 +59,7 @@ inline std::mutex& g_cout_mutex() {
   static std::mutex m;
   return m;
 }
-inline std::ostream* g_out = &std::clog;
+inline std::ostream* g_out = &std::cerr;
 
 // Color support (ANSI escape sequences). Can be disabled at runtime.
 inline std::atomic<bool> g_color_enabled{true};

@@ -6,7 +6,8 @@ using namespace std::chrono_literals;
 Task<int> simple_task2() {
   // sleep 1 秒
   LOG_DEBUG("simple_task2 - started");
-  co_await 1s;
+  std::cout << "simple_task2: Sleeping for 1 second..." << std::endl;
+  co_await sleep_for(1000);
   co_return 2;
 }
 
@@ -29,11 +30,11 @@ Task<int> simple_task() {
 }
 
 int main() {
-  LOG_DEBUG("Add Demo Started");
-  std::cout << "Starting simple_task..." << std::endl;
   debug::set_level(debug::Level::Trace);
   debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                           debug::Detail::ThreadId | debug::Detail::FileLine);
+  LOG_DEBUG("Add Demo Started");
+
   LOG_DEBUG("creating simple_task");
   auto task = simple_task();
   task.then([](int result) {
@@ -44,10 +45,8 @@ int main() {
       })
       .finally(
           []() { std::cout << "Task has finished execution." << std::endl; });
-  std::shared_ptr<AbstractExecutor> executor =
-      std::make_shared<NewThreadExecutor>();
-  LOG_DEBUG("Submitting task to NewThreadExecutor");
-  Runtime::block_on(std::move(task.via(executor)));
+
+  Runtime::block_on(std::move(task));
   LOG_DEBUG("Add Demo Finished");
   return 0;
 }

@@ -40,11 +40,6 @@ int main() {
   auto task = []() -> Task<int> {
     std::cout << "Task started, sleeping for 2 seconds..." << std::endl;
     co_await sleep_for(2000);
-    std::cout << "Woke up, switching to AsyncExecutor..." << std::endl;
-    co_await switch_executor(std::make_shared<AsyncExecutor>());
-    std::cout << "Now running on AsyncExecutor, sleeping for 1 second..."
-              << std::endl;
-    co_await sleep_for(1000);
     std::cout << "Woke up, returning result 42." << std::endl;
     co_return 42;
   }();
@@ -55,7 +50,6 @@ int main() {
 
   //   Start two infinite loops on the same executor
   auto exec = std::make_shared<LooperExecutor>();
-  Runtime::join_all(loop_1().via(exec), loop_2().via(exec), loop_3().via(exec),
-                    loop_4().via(exec));
+  Runtime::join_all(loop_1(), loop_2(), loop_3(), loop_4());
   return 0;
 }

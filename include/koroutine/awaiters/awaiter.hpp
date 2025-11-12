@@ -1,7 +1,7 @@
 #pragma once
 #include "../coroutine_common.h"
-#include "../executors/executor.h"
 #include "../result.hpp"
+#include "../schedulers/scheduler.h"
 
 namespace koroutine {
 
@@ -16,35 +16,38 @@ class AwaiterBaseCRTP {
 
   // move constructor
   AwaiterBaseCRTP(AwaiterBaseCRTP&& awaiter) noexcept
-      : _executor(std::move(awaiter._executor)),
+      : _scheduler(std::move(awaiter._scheduler)),
         _handle(std::move(awaiter._handle)),
         _result(std::move(awaiter._result)) {}
 
-  bool await_ready() const { return false; }
+  virtual bool await_ready() const {
+    LOG_TRACE("AwaiterBase::await_ready - default implementation always false");
+    return false;
+  }
 
   void await_suspend(std::coroutine_handle<> handle) {
     this->_handle = handle;
     static_cast<Derived*>(this)->after_suspend();
   }
 
-  void install_executor(std::shared_ptr<AbstractExecutor> executor) {
-    if (!executor) {
-      LOG_WARN("AwaiterBase::install_executor - null executor provided");
+  void install_scheduler(std::shared_ptr<AbstractScheduler> scheduler) {
+    if (!scheduler) {
+      LOG_WARN("AwaiterBase::install_scheduler - null scheduler provided");
     }
-    _executor = executor;
+    _scheduler = scheduler;
   }
 
  protected:
   std::optional<Result<R>> _result{};
-  std::shared_ptr<AbstractExecutor> _executor = nullptr;
+  std::shared_ptr<AbstractScheduler> _scheduler = nullptr;
   std::coroutine_handle<> _handle = nullptr;
 
   void dispatch(std::function<void()>&& f) {
-    if (_executor) {
-      _executor->execute(std::move(f));
+    if (_scheduler) {
+      _scheduler->schedule(std::move(f), 0);
     } else {
       LOG_WARN(
-          "AwaiterBase::dispatch - no executor bound, executing on current "
+          "AwaiterBase::dispatch - no scheduler bound, executing on current "
           "thread.");
       f();
     }
@@ -59,9 +62,9 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
  public:
   using Base = AwaiterBaseCRTP<R, AwaiterBase<R>>;
   using ResultType = R;
-  using Base::_executor;
   using Base::_handle;
   using Base::_result;
+  using Base::_scheduler;
   using Base::dispatch;
 
   // default constructor
@@ -113,9 +116,9 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
  public:
   using Base = AwaiterBaseCRTP<void, AwaiterBase<void>>;
   using ResultType = void;
-  using Base::_executor;
   using Base::_handle;
   using Base::_result;
+  using Base::_scheduler;
   using Base::dispatch;
 
   // default constructor
