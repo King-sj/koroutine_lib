@@ -65,9 +65,9 @@ class TaskBase {
     if (!scheduler) {
       LOG_WARN("Task::start - no scheduler set, using default scheduler");
       scheduler = SchedulerManager::get_default_scheduler();
+      handle_.promise().set_scheduler(scheduler);
     }
     LOG_TRACE("Task::start - starting task with scheduler");
-    handle_.promise().set_scheduler(scheduler);
     scheduler->schedule(
         [h = handle_]() {
           LOG_TRACE("Task::start - resuming coroutine");

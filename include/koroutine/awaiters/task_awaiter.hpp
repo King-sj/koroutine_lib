@@ -20,9 +20,10 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
 
   TaskAwaiter& operator=(TaskAwaiter&) = delete;
   virtual bool await_ready() const override {
-    LOG_TRACE("TaskAwaiter::await_ready - checking if task is ready");
-    // TODO: 可以通过检查 task_ 的状态来决定是否 ready
-    return true;
+    LOG_TRACE("TaskAwaiter::await_ready - checking if task is ready : ",
+              task_.handle_.done());
+    // A task is ready if its coroutine handle is done
+    return task_.handle_.done();
   }
 
  protected:
@@ -33,6 +34,7 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
       this->resume_unsafe();
       LOG_TRACE("TaskAwaiter::after_suspend - resumed awaiting coroutine");
     });
+    task_.start();
   }
 
   void before_resume() override {

@@ -17,11 +17,10 @@ struct ResultBase {
   explicit ResultBase() = default;
 
   explicit ResultBase(std::exception_ptr&& exception_ptr)
-      : _exception_ptr(exception_ptr) {}
+      : _exception_ptr(std::move(exception_ptr)) {}
 
  protected:
-  std::exception_ptr _exception_ptr =
-      std::make_exception_ptr(UninitializedResultException());
+  std::exception_ptr _exception_ptr;
 };
 
 // 通用模板 - 非 void 类型
@@ -37,7 +36,7 @@ struct Result : ResultBase<T, Result<T>> {
       : Base(std::move(exception_ptr)) {}
 
   T get_or_throw() {
-    LOG_TRACE("Result::get_or_throw - checking for exception with value",
+    LOG_TRACE("Result::get_or_throw - checking for exception with value ",
               _value);
     if (this->_exception_ptr) {
       LOG_ERROR("Result::get_or_throw - throwing stored exception");

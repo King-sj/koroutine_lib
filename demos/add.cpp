@@ -30,7 +30,7 @@ Task<int> simple_task() {
 }
 
 int main() {
-  debug::set_level(debug::Level::Trace);
+  debug::set_level(debug::Level::Debug);
   debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                           debug::Detail::ThreadId | debug::Detail::FileLine);
   LOG_DEBUG("Add Demo Started");
@@ -45,8 +45,11 @@ int main() {
       })
       .finally(
           []() { std::cout << "Task has finished execution." << std::endl; });
-
-  Runtime::block_on(std::move(task));
+  try {
+    Runtime::block_on(std::move(task));
+  } catch (const std::exception& e) {
+    std::cerr << "Unhandled exception in main: " << e.what() << std::endl;
+  }
   LOG_DEBUG("Add Demo Finished");
   return 0;
 }

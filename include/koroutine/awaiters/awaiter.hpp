@@ -18,7 +18,9 @@ class AwaiterBaseCRTP {
   AwaiterBaseCRTP(AwaiterBaseCRTP&& awaiter) noexcept
       : _scheduler(std::move(awaiter._scheduler)),
         _handle(std::move(awaiter._handle)),
-        _result(std::move(awaiter._result)) {}
+        _result(std::move(awaiter._result)) {
+    LOG_INFO("AwaiterBaseCRTP::move constructor - moved awaiter");
+  }
 
   virtual bool await_ready() const {
     LOG_TRACE("AwaiterBase::await_ready - default implementation always false");
@@ -26,32 +28,47 @@ class AwaiterBaseCRTP {
   }
 
   void await_suspend(std::coroutine_handle<> handle) {
+    LOG_INFO(
+        "AwaiterBase::await_suspend - suspending coroutine, and storing "
+        "the caller handle  ",
+        handle.address());
     this->_handle = handle;
     static_cast<Derived*>(this)->after_suspend();
   }
 
   void install_scheduler(std::shared_ptr<AbstractScheduler> scheduler) {
     if (!scheduler) {
-      LOG_WARN("AwaiterBase::install_scheduler - null scheduler provided");
+      LOG_ERROR("AwaiterBase::install_scheduler - null scheduler provided");
     }
+    LOG_TRACE("AwaiterBase::install_scheduler - installing scheduler");
     _scheduler = scheduler;
   }
 
  protected:
-  std::optional<Result<R>> _result{};
-  std::shared_ptr<AbstractScheduler> _scheduler = nullptr;
-  std::coroutine_handle<> _handle = nullptr;
-
   void dispatch(std::function<void()>&& f) {
+    if (!_handle) {
+      LOG_ERROR(
+          "AwaiterBase::dispatch - no coroutine handle set, cannot dispatch.");
+      return;
+    }
     if (_scheduler) {
       _scheduler->schedule(std::move(f), 0);
     } else {
-      LOG_WARN(
+      LOG_ERROR(
           "AwaiterBase::dispatch - no scheduler bound, executing on current "
           "thread.");
       f();
     }
   }
+  void resume_unsafe() {
+    dispatch([this]() { _handle.resume(); });
+  }
+
+ protected:
+  std::optional<Result<R>> _result{};
+  std::shared_ptr<AbstractScheduler> _scheduler = nullptr;
+  //   存储调用者的协程句柄，用于awaiter执行结束后恢复调用者协程
+  std::coroutine_handle<> _handle = nullptr;
 };
 
 // 通用模板 - 非 void 类型
@@ -86,10 +103,6 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
       _result = Result<R>(static_cast<R>(value));
       _handle.resume();
     });
-  }
-
-  void resume_unsafe() {
-    dispatch([this]() { _handle.resume(); });
   }
 
   void resume_exception(std::exception_ptr&& e) {
@@ -140,10 +153,6 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
       _result = Result<void>();
       _handle.resume();
     });
-  }
-
-  void resume_unsafe() {
-    dispatch([this]() { _handle.resume(); });
   }
 
   void resume_exception(std::exception_ptr&& e) {

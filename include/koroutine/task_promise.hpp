@@ -38,14 +38,20 @@ struct TaskPromiseBase {
   template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
     LOG_TRACE("TaskPromise::await_transform - transforming Task<_ResultType>");
-    return TaskAwaiter<_ResultType>{std::move(task)};
+    auto awaiter = TaskAwaiter<_ResultType>{std::move(task)};
+    awaiter.install_scheduler(scheduler.lock());
+    return awaiter;
   }
 
   template <typename _Rep, typename _Period>
   auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    long long delay_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
     LOG_TRACE("TaskPromise::await_transform - transforming sleep duration: ",
-              duration.count());
-    return await_transform(SleepAwaiter(duration.count()));
+              delay_ms, " ms");
+    auto awaiter = SleepAwaiter(delay_ms);
+    awaiter.install_scheduler(scheduler.lock());
+    return awaiter;
   }
 
   template <typename AwaiterImpl>
@@ -86,6 +92,24 @@ struct TaskPromiseBase {
     return static_cast<Derived*>(this)->get_return_object_impl();
   }
 
+  ResultType get_result() {
+    LOG_TRACE("TaskPromise::get_result - waiting for result");
+    std::unique_lock lock(completion_lock);
+    LOG_TRACE("TaskPromise::get_result - acquired lock");
+    if (!result.has_value()) {
+      LOG_TRACE("TaskPromise::get_result - waiting on condition variable");
+      completion.wait(lock);
+      LOG_TRACE("TaskPromise::get_result - woke up from wait");
+    }
+    LOG_TRACE("TaskPromise::get_result - returning result");
+    if constexpr (std::is_void_v<ResultType>) {
+      result->get_or_throw();
+      return;
+    } else {
+      return result->get_or_throw();
+    }
+  }
+
  protected:
   friend class TaskBase<ResultType, Task<ResultType>>;
 
@@ -97,7 +121,8 @@ struct TaskPromiseBase {
       SchedulerManager::get_default_scheduler();
 
   void notify_callbacks() {
-    LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks");
+    LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks ",
+              completion_callbacks.size());
     for (auto& callback : completion_callbacks) {
       callback(*result);
     }
@@ -125,19 +150,6 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
     completion.notify_all();
     notify_callbacks();
   }
-
-  ResultType get_result() {
-    LOG_TRACE("TaskPromise::get_result - waiting for result");
-    std::unique_lock lock(completion_lock);
-    LOG_TRACE("TaskPromise::get_result - acquired lock");
-    if (!result.has_value()) {
-      LOG_TRACE("TaskPromise::get_result - waiting on condition variable");
-      completion.wait(lock);
-      LOG_TRACE("TaskPromise::get_result - woke up from wait");
-    }
-    LOG_TRACE("TaskPromise::get_result - returning result");
-    return result->get_or_throw();
-  }
 };
 
 // void 类型的特化
@@ -154,20 +166,6 @@ struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
     result = Result<void>();
     completion.notify_all();
     notify_callbacks();
-  }
-
-  void get_result() {
-    LOG_TRACE("TaskPromise<void>::get_result - waiting for result");
-    std::unique_lock lock(completion_lock);
-    LOG_TRACE("TaskPromise<void>::get_result - acquired lock");
-    if (!result.has_value()) {
-      LOG_TRACE(
-          "TaskPromise<void>::get_result - waiting on condition variable");
-      completion.wait(lock);
-      LOG_TRACE("TaskPromise<void>::get_result - woke up from wait");
-    }
-    LOG_TRACE("TaskPromise<void>::get_result - returning result");
-    result->get_or_throw();
   }
 };
 
