@@ -18,3 +18,5 @@
 取消机制 (Cancellation):
 - [ ] 提供一套标准的、协作式的取消机制。当一个协程任务不再需要时，可以安全地通知它停止工作并释放资源。
 - [ ] 优先级调度
+- [ ] awaitable list
+    - [ ] await gather(list of awaitables)

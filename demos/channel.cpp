@@ -48,7 +48,7 @@ Task<void> consumer2(Channel<int>& chan) {
 }
 
 int main() {
-  debug::set_level(debug::Level::Trace);
+  debug::set_level(debug::Level::Debug);
   debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                           debug::Detail::ThreadId | debug::Detail::FileLine);
   //   Runtime::block_on(afun());
