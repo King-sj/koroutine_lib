@@ -14,11 +14,19 @@ class TaskBase {
   using promise_type = TaskPromise<ResultType>;
   using handle_type = std::coroutine_handle<promise_type>;
 
-  explicit TaskBase(handle_type handle) : handle_(handle) {}
+  explicit TaskBase(handle_type handle) : handle_(handle) {
+    LOG_INFO("TaskBase::constructor - handle address: ", handle_.address());
+  }
 
   ~TaskBase() {
-    if (handle_) {
+    LOG_INFO("TaskBase::~TaskBase - destroying, handle address: ",
+             handle_ ? handle_.address() : nullptr);
+    if (handle_ && handle_.address() != nullptr) {
+      LOG_INFO("TaskBase::~TaskBase - destroying coroutine handle");
       handle_.destroy();
+    } else if (handle_) {
+      LOG_ERROR(
+          "TaskBase::~TaskBase - handle is not null but address is null!");
     }
   }
 
@@ -26,7 +34,11 @@ class TaskBase {
   TaskBase& operator=(const TaskBase&) = delete;
 
   TaskBase(TaskBase&& task) noexcept
-      : handle_(std::exchange(task.handle_, {})) {}
+      : handle_(std::exchange(task.handle_, nullptr)) {
+    LOG_INFO("TaskBase::move constructor - moved TaskBase<ResultType>, from: ",
+             handle_ ? handle_.address() : nullptr,
+             " source now: ", task.handle_ ? task.handle_.address() : nullptr);
+  }
 
   TaskBase& operator=(TaskBase&& other) noexcept {
     if (this != &other) {
@@ -92,6 +104,13 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
   using Base::handle_;
 
   explicit Task(handle_type handle) : Base(handle) {}
+  Task(const Task&) = delete;
+  Task& operator=(const Task&) = delete;
+  Task(Task&& task) noexcept : Base(std::move(task)) {
+    LOG_INFO("Task::move constructor - moved Task<ResultType>");
+  }
+  Task& operator=(Task&&) noexcept = default;
+  ~Task() = default;
 
   Task& then(std::function<void(ResultType)>&& func) {
     handle_.promise().on_completed([func](auto result) {
@@ -125,6 +144,14 @@ class Task<void> : public TaskBase<void, Task<void>> {
   using Base::handle_;
 
   explicit Task(handle_type handle) : Base(handle) {}
+  Task(const Task&) = delete;
+  Task& operator=(const Task&) = delete;
+  Task(Task&& task) noexcept : Base(std::move(task)) {
+    LOG_INFO("Task::move constructor - moved Task<void>");
+  }
+  Task& operator=(Task&&) noexcept = default;
+
+  ~Task() = default;
 
   Task& then(std::function<void()>&& func) {
     handle_.promise().on_completed([func](auto result) {

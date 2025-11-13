@@ -90,10 +90,13 @@ static ResultType block_on(Task<ResultType>&& task) {
 static void block_on(Task<void>&& task) {
   LOG_TRACE("Runtime::block_on - blocking on void task for completion");
   // wrap a Task<int> around Task<void>
-  auto wrapper_task = [&task]() -> Task<int> {
-    co_await std::move(task);
+  // FIXME: Don't capture the task directly in lambda - it will be destroyed
+  // before being moved to coroutine frame. Instead, create a helper coroutine.
+  auto wrapper = [](Task<void> t) -> Task<int> {
+    co_await std::move(t);
     co_return 0;
-  }();
+  };
+  auto wrapper_task = wrapper(std::move(task));
   block_on(std::move(wrapper_task));
 }
 

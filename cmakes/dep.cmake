@@ -14,7 +14,7 @@ endif()
 
 
 
-add_custom_target(graphviz ALL
+add_custom_target(graphviz
     COMMAND ${CMAKE_COMMAND} "--graphviz=dep.dot" .
     COMMAND dot -Tpng dep.dot -o ../output/img/dep.png
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"

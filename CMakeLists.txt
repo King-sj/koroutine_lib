@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.30)
 project(KoroutineLibrary VERSION 0.0.1 LANGUAGES CXX)
 
 enable_testing()
@@ -51,4 +51,19 @@ install(TARGETS koroutinelib_static koroutinelib_shared
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
+)
+
+# 生成聚合的 header
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/include/koroutine
+    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/generate_single_header.py ${CMAKE_SOURCE_DIR}/include/koroutine ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
+    DEPENDS ${CMAKE_SOURCE_DIR}/include/koroutine/*.hpp ${CMAKE_SOURCE_DIR}/scripts/generate_single_header.py
+    COMMENT "Generating single header file koroutine.hpp (inlining project headers)"
+)
+
+# expose a custom target so users can run: cmake --build build --target koroutine_single_header
+add_custom_target(koroutine_single_header
+    DEPENDS ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
+    COMMENT "Target to (re)generate single-header koroutine.hpp"
 )
