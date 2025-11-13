@@ -1,31 +1,187 @@
 #if defined(__APPLE__)
 #include "koroutine/async_io/platform/macos/kqueue_engin.h"
 
+#include <errno.h>
+#include <sys/event.h>
+#include <unistd.h>
+
+#include <system_error>
+
 #include "koroutine/async_io/engin.h"
 
 namespace koroutine::async_io {
-KqueueIOEngine::KqueueIOEngine() {
-  // 初始化kqueue相关资源
+
+KqueueIOEngine::KqueueIOEngine() : running_(false) {
+  // 创建 kqueue 文件描述符
+  kqueue_fd_ = kqueue();
+  if (kqueue_fd_ == -1) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to create kqueue");
+  }
 }
 
 KqueueIOEngine::~KqueueIOEngine() {
-  // 清理kqueue相关资源
+  stop();
+  if (kqueue_fd_ != -1) {
+    ::close(kqueue_fd_);
+  }
 }
 
 void KqueueIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
-  // 提交异步IO操作到kqueue
+  std::lock_guard<std::mutex> lock(ops_mutex_);
+  pending_ops_.push(op);
 }
 
 void KqueueIOEngine::run() {
-  // 运行kqueue事件循环
+  running_.store(true);
+
+  constexpr int MAX_EVENTS = 64;
+  struct kevent events[MAX_EVENTS];
+
+  while (running_.load()) {
+    // 处理待提交的操作
+    {
+      std::lock_guard<std::mutex> lock(ops_mutex_);
+      while (!pending_ops_.empty()) {
+        auto op = pending_ops_.front();
+        pending_ops_.pop();
+
+        switch (op->type) {
+          case OpType::READ:
+            process_read(op);
+            break;
+          case OpType::WRITE:
+            process_write(op);
+            break;
+          case OpType::CLOSE:
+            process_close(op);
+            break;
+          default:
+            op->error = std::make_error_code(std::errc::not_supported);
+            complete(op);
+            break;
+        }
+      }
+    }
+
+    // 等待 kqueue 事件，超时时间 100ms
+    struct timespec timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 100'000'000;  // 100ms
+
+    int nev = kevent(kqueue_fd_, nullptr, 0, events, MAX_EVENTS, &timeout);
+
+    if (nev < 0) {
+      if (errno == EINTR) {
+        continue;  // 被信号中断，继续循环
+      }
+      // 其他错误
+      throw std::system_error(errno, std::generic_category(), "kevent failed");
+    }
+
+    // 处理就绪的事件
+    for (int i = 0; i < nev; ++i) {
+      auto& event = events[i];
+      intptr_t fd = static_cast<intptr_t>(event.ident);
+
+      auto it = active_ops_.find(fd);
+      if (it == active_ops_.end()) {
+        continue;  // 找不到对应的操作，跳过
+      }
+
+      auto op = it->second;
+
+      // 检查是否有错误
+      if (event.flags & EV_ERROR) {
+        op->error = std::make_error_code(std::errc::io_error);
+        op->actual_size = 0;
+      } else {
+        // 根据操作类型执行实际的 IO
+        if (op->type == OpType::READ) {
+          ssize_t n = ::read(fd, op->buffer, op->size);
+          if (n < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+            op->actual_size = 0;
+          } else {
+            op->actual_size = static_cast<size_t>(n);
+          }
+        } else if (op->type == OpType::WRITE) {
+          ssize_t n = ::write(fd, op->buffer, op->size);
+          if (n < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+            op->actual_size = 0;
+          } else {
+            op->actual_size = static_cast<size_t>(n);
+          }
+        }
+      }
+
+      // 从 active_ops_ 中移除
+      active_ops_.erase(it);
+
+      // 完成操作，恢复协程
+      complete(op);
+    }
+  }
 }
 
-void KqueueIOEngine::stop() {
-  // 停止kqueue事件循环
+void KqueueIOEngine::stop() { running_.store(false); }
+
+bool KqueueIOEngine::is_running() { return running_.load(); }
+
+void KqueueIOEngine::process_read(std::shared_ptr<AsyncIOOp> op) {
+  intptr_t fd = op->io_object->native_handle();
+
+  // 注册读事件到 kqueue
+  struct kevent kev;
+  EV_SET(&kev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, nullptr);
+
+  if (kevent(kqueue_fd_, &kev, 1, nullptr, 0, nullptr) == -1) {
+    op->error = std::make_error_code(static_cast<std::errc>(errno));
+    complete(op);
+    return;
+  }
+
+  // 记录活动的操作
+  active_ops_[fd] = op;
 }
-bool KqueueIOEngine::is_running() {
-  // 检查kqueue事件循环是否在运行
-  return false;
+
+void KqueueIOEngine::process_write(std::shared_ptr<AsyncIOOp> op) {
+  intptr_t fd = op->io_object->native_handle();
+
+  // 注册写事件到 kqueue
+  struct kevent kev;
+  EV_SET(&kev, fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, nullptr);
+
+  if (kevent(kqueue_fd_, &kev, 1, nullptr, 0, nullptr) == -1) {
+    op->error = std::make_error_code(static_cast<std::errc>(errno));
+    complete(op);
+    return;
+  }
+
+  // 记录活动的操作
+  active_ops_[fd] = op;
+}
+
+void KqueueIOEngine::process_close(std::shared_ptr<AsyncIOOp> op) {
+  intptr_t fd = op->io_object->native_handle();
+
+  // 从 kqueue 中删除该文件描述符的所有监听
+  struct kevent kev[2];
+  EV_SET(&kev[0], fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+  EV_SET(&kev[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
+  kevent(kqueue_fd_, kev, 2, nullptr, 0, nullptr);
+
+  // 关闭文件描述符
+  if (::close(fd) == -1) {
+    op->error = std::make_error_code(static_cast<std::errc>(errno));
+  }
+
+  // 从 active_ops_ 中移除
+  active_ops_.erase(fd);
+
+  // 完成操作
+  complete(op);
 }
 
 }  // namespace koroutine::async_io

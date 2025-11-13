@@ -6,7 +6,8 @@ class MockAsyncIOObject : public AsyncIOObject {
   std::vector<char> data_;
 
  public:
-  explicit MockAsyncIOObject(IOEngine& engine) : AsyncIOObject(engine) {}
+  explicit MockAsyncIOObject(std::shared_ptr<IOEngine> engine)
+      : AsyncIOObject(engine) {}
   Task<size_t> read(void* buf, size_t size) override {
     size_t to_read = std::min(size, data_.size());
     std::memcpy(buf, data_.data(), to_read);

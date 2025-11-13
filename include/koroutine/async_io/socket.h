@@ -74,7 +74,7 @@ class AsyncSocket : public AsyncIOObject,
     co_return std::make_unique<AsyncSocket>(engine, fd);
   }
 
-  AsyncSocket(IOEngine& engine, intptr_t sockfd)
+  AsyncSocket(std::shared_ptr<IOEngine> engine, intptr_t sockfd)
       : AsyncIOObject(engine), sockfd_(sockfd) {}
 
   Task<size_t> read(void* buf, size_t size) override {

@@ -1,6 +1,6 @@
 #pragma once
+#include "koroutine/awaiters/io_awaiter.hpp"
 #include "koroutine/task.hpp"
-
 namespace koroutine::async_io {
 // enum class IOObjectType { File, Socket, Pipe, Timer, Signal, Other };
 enum class OpType {
@@ -28,8 +28,12 @@ class AsyncIOObject {
 
  protected:
   friend class IOEngine;
-  explicit AsyncIOObject(IOEngine& engine) : engine_(engine) {}
-  IOEngine& engine_;  // 关联的IO引擎
+
+  friend class IOAwaiter;
+
+  explicit AsyncIOObject(std::shared_ptr<IOEngine> engine)
+      : engine_(std::move(engine)) {}
+  std::shared_ptr<IOEngine> engine_;  // 关联的IO引擎
 };
 
 }  // namespace koroutine::async_io

@@ -70,7 +70,7 @@ inline int translate_mode(std::ios::openmode mode) {
 class AsyncFile : public AsyncIOObject,
                   public std::enable_shared_from_this<AsyncFile> {
  public:
-  static Task<std::unique_ptr<AsyncFile>> open(IOEngine& engine,
+  static Task<std::unique_ptr<AsyncFile>> open(std::shared_ptr<IOEngine> engine,
                                                const std::string& path,
                                                std::ios::openmode mode) {
     // 平台相关的文件打开操作
