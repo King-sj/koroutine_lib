@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-matrix:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install prerequisites (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build zip
+
+      - name: Install prerequisites (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update || true
+          brew install cmake ninja || true
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Generate single header
+        run: cmake --build build --target koroutine_single_header --config Release
+
+      - name: Build
+        run: cmake --build build --config Release -- -j
+
+      - name: Package artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p artifacts
+          ZIP=artifacts/koroutine-${{ matrix.os }}.zip
+          if [ -d build/lib ]; then
+            zip -r "$ZIP" build/lib || true
+          fi
+          if [ -f build/include/koroutine/koroutine.hpp ]; then
+            zip -u "$ZIP" build/include/koroutine/koroutine.hpp || true
+          fi
+          ls -lh artifacts
+
+      - name: Package artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $zip = "artifacts/koroutine-${{ matrix.os }}.zip"
+          $outFiles = @()
+          if (Test-Path -Path "build\lib") { $outFiles += Get-ChildItem -Path build\lib -Recurse | Select-Object -ExpandProperty FullName }
+          if (Test-Path -Path "build\include\koroutine\koroutine.hpp") { $outFiles += (Resolve-Path build\include\koroutine\koroutine.hpp).Path }
+          if ($outFiles.Count -gt 0) { Compress-Archive -Path $outFiles -DestinationPath $zip -Force }
+          Get-ChildItem artifacts | Format-List
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: koroutine-${{ matrix.os }}
+          path: artifacts/koroutine-${{ matrix.os }}.zip
+
+  create-release:
+    name: Create Release
+    needs: build-matrix
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: koroutine-ubuntu-latest
+          path: artifacts/ubuntu
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: koroutine-macos-latest
+          path: artifacts/macos
+
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: koroutine-windows-latest
+          path: artifacts/windows
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Automated release built from tag ${{ github.ref_name }}.
+          draft: false
+          prerelease: false
+
+      - name: Upload linux artifacts to release
+        if: always()
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/ubuntu/koroutine-ubuntu-latest.zip
+          asset_name: koroutine-ubuntu-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+
+      - name: Upload macOS artifacts to release
+        if: always()
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/macos/koroutine-macos-latest.zip
+          asset_name: koroutine-macos-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+
+      - name: Upload windows artifacts to release
+        if: always()
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/windows/koroutine-windows-latest.zip
+          asset_name: koroutine-windows-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
