@@ -93,12 +93,6 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
 
   explicit Task(handle_type handle) : Base(handle) {}
 
-  // blocking for result or throw on exception
-  ResultType get_result() {
-    LOG_TRACE("Task::get_result - getting result from promise");
-    return handle_.promise().get_result();
-  }
-
   Task& then(std::function<void(ResultType)>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
@@ -110,6 +104,14 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
       }
     });
     return *this;
+  }
+
+ protected:
+  friend class TaskAwaiter<ResultType>;
+  // blocking for result or throw on exception
+  ResultType get_result() {
+    LOG_TRACE("Task::get_result - getting result from promise");
+    return handle_.promise().get_result();
   }
 };
 
@@ -124,8 +126,6 @@ class Task<void> : public TaskBase<void, Task<void>> {
 
   explicit Task(handle_type handle) : Base(handle) {}
 
-  void get_result() { handle_.promise().get_result(); }
-
   Task& then(std::function<void()>&& func) {
     handle_.promise().on_completed([func](auto result) {
       try {
@@ -139,6 +139,10 @@ class Task<void> : public TaskBase<void, Task<void>> {
     });
     return *this;
   }
+
+ protected:
+  friend class TaskAwaiter<void>;
+  void get_result() { handle_.promise().get_result(); }
 };
 
 // get_return_object_impl 的实现必须在 Task 完全定义之后

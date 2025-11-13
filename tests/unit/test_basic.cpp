@@ -6,11 +6,9 @@ using namespace koroutine;
 
 // 测试Task协程基本功能
 TEST(KoroutineTest, BasicTaskInt) {
-  auto simple_task = []() -> Task<int> { co_return 42; };
-
-  auto task = simple_task();
-
-  EXPECT_EQ(task.get_result(), 42);
+  auto task = []() -> Task<int> { co_return 42; }();
+  auto res = Runtime::block_on(std::move(task));
+  EXPECT_EQ(res, 42);
 }
 
 // 测试Task<void>协程
@@ -24,6 +22,7 @@ TEST(KoroutineTest, BasicTaskVoid) {
 
   EXPECT_FALSE(executed);
   auto task = simple_task();
+  Runtime::block_on(std::move(task));
   EXPECT_TRUE(executed);
 }
 
@@ -73,7 +72,7 @@ TEST(KoroutineTest, TaskWithString) {
 
   auto task = string_task();
 
-  EXPECT_EQ(task.get_result(), "Hello Koroutine!");
+  EXPECT_EQ(Runtime::block_on(std::move(task)), "Hello Koroutine!");
 }
 
 // 测试多次resume的情况
@@ -82,7 +81,7 @@ TEST(KoroutineTest, MultipleResume) {
 
   auto task = simple_task();
 
-  EXPECT_EQ(task.get_result(), 100);
+  EXPECT_EQ(Runtime::block_on(std::move(task)), 100);
 }
 
 // 测试Generator的map、filter、flat_map等操作
@@ -167,7 +166,7 @@ TEST(KoroutineTest, TaskThenCatchingFinally) {
       })
       .catching([&](std::exception& e) { catching_called = true; })
       .finally([&]() { finally_called = true; });
-  task.get_result();  // 确保任务完成
+  Runtime::block_on(std::move(task));  // 确保任务完成
   EXPECT_TRUE(then_called);
   EXPECT_FALSE(catching_called);
   EXPECT_TRUE(finally_called);
@@ -187,7 +186,7 @@ TEST(KoroutineTest, TaskThenCatchingFinally) {
       })
       .finally([&]() { finally_called = true; });
   try {
-    error_task.get_result();  // 确保任务完成
+    Runtime::block_on(std::move(error_task));  // 确保任务完成
   } catch (...) {
     // 忽略异常
   }

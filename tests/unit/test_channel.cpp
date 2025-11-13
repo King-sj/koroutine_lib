@@ -11,11 +11,10 @@ TEST(ChannelTest, BasicChannel) {
     for (int i = 0; i < 5; ++i) {
       co_await (chan << i);
     }
-    chan.close();
+    co_await chan.close_when_empty();
   };
-
-  auto consumer = [&chan]() -> Task<std::vector<int>> {
-    std::vector<int> received;
+  std::vector<int> received;
+  auto consumer = [&chan, &received]() -> Task<std::vector<int>> {
     try {
       while (true) {
         int value;
@@ -31,9 +30,8 @@ TEST(ChannelTest, BasicChannel) {
   auto prod_task = producer();
   auto cons_task = consumer();
 
-  Runtime::block_on(std::move(prod_task));
-  auto received_values = Runtime::block_on(std::move(cons_task));
+  Runtime::join_all(std::move(prod_task), std::move(cons_task));
 
   std::vector<int> expected_values = {0, 1, 2, 3, 4};
-  EXPECT_EQ(received_values, expected_values);
+  EXPECT_EQ(received, expected_values);
 }
