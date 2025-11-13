@@ -88,7 +88,9 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
   AwaiterBase() = default;
 
   // move constructor
-  AwaiterBase(AwaiterBase&& awaiter) noexcept : Base(std::move(awaiter)) {}
+  AwaiterBase(AwaiterBase&& awaiter) noexcept : Base(std::move(awaiter)) {
+    LOG_INFO("AwaiterBase::move constructor - moved AwaiterBase");
+  }
 
   R await_resume() {
     LOG_TRACE("AwaiterBase::await_resume - preparing to resume");

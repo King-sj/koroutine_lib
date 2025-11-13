@@ -14,7 +14,11 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
   explicit TaskAwaiter(Task<ResultType>&& task) noexcept
       : task_(std::move(task)) {}
 
-  TaskAwaiter(TaskAwaiter&&) noexcept = default;
+  TaskAwaiter(TaskAwaiter&& other) noexcept
+      : AwaiterBase<ResultType>(std::move(other)),
+        task_(std::move(other.task_)) {
+    LOG_INFO("TaskAwaiter::move constructor - moved TaskAwaiter");
+  }
 
   TaskAwaiter(TaskAwaiter&) = delete;
 
