@@ -3,7 +3,6 @@
 #include <thread>
 
 #include "../coroutine_common.h"
-#include "../executors/executor.h"
 #include "awaiter.hpp"
 
 namespace koroutine {

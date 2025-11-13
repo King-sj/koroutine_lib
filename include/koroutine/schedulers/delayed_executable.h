@@ -30,7 +30,10 @@ class DelayedExecutable {
 
 class DelayedExecutableCompare {
  public:
-  bool operator()(DelayedExecutable& left, DelayedExecutable& right) {
+  // priority_queue 需要可调用 const T& 的比较器，这里改为 const 引用并声明为
+  // const 成员。
+  bool operator()(const DelayedExecutable& left,
+                  const DelayedExecutable& right) const {
     return left.get_scheduled_time() > right.get_scheduled_time();
   }
 };

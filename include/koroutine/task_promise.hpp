@@ -9,43 +9,58 @@
 #include "awaiters/sleep_awaiter.hpp"
 #include "awaiters/task_awaiter.hpp"
 #include "coroutine_common.h"
-#include "executors/executor.h"
+#include "scheduler_manager.h"
 
 namespace koroutine {
 
 template <typename AwaiterImpl, typename R>
 concept AwaiterImplRestriction =
     std::is_base_of<AwaiterBase<R>, AwaiterImpl>::value;
-
-template <typename ResultType, typename Executor>
+template <typename ResultType, typename Derived>
+class TaskBase;
+template <typename ResultType>
 class Task;
 
-template <typename ResultType, typename Executor>
-struct TaskPromise {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{&executor}; }
-  auto final_suspend() noexcept { return std::suspend_always{}; }
-  Task<ResultType, Executor> get_return_object() {
-    return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
+// CRTP 基类 - Derived 是派生类 (TaskPromise<ResultType>)
+template <typename ResultType, typename Derived>
+struct TaskPromiseBase {
+  auto initial_suspend() {
+    LOG_TRACE("TaskPromise::initial_suspend - suspending initially");
+    return std::suspend_always{};
   }
 
-  template <typename _ResultType, typename _Executor>
-  TaskAwaiter<_ResultType, _Executor> await_transform(
-      Task<_ResultType, _Executor>&& task) {
-    return TaskAwaiter<_ResultType, _Executor>{std::move(task)};
+  auto final_suspend() noexcept {
+    // 在 ~task 中 调用 handle_.destroy()
+    LOG_TRACE("TaskPromise::final_suspend - final suspend point");
+    return std::suspend_always{};
+  }
+
+  template <typename _ResultType>
+  TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
+    LOG_TRACE("TaskPromise::await_transform - transforming Task<_ResultType>");
+    auto awaiter = TaskAwaiter<_ResultType>{std::move(task)};
+    awaiter.install_scheduler(scheduler.lock());
+    return awaiter;
   }
 
   template <typename _Rep, typename _Period>
-  TaskAwaiter<ResultType, Executor> await_transform(
-      std::chrono::duration<_Rep, _Period>&& duration) {
-    return await_transform(SleepAwaiter(duration));
+  auto await_transform(std::chrono::duration<_Rep, _Period>&& duration) {
+    long long delay_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    LOG_TRACE("TaskPromise::await_transform - transforming sleep duration: ",
+              delay_ms, " ms");
+    auto awaiter = SleepAwaiter(delay_ms);
+    awaiter.install_scheduler(scheduler.lock());
+    return awaiter;
   }
 
   template <typename AwaiterImpl>
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
-  AwaiterImpl await_transform(AwaiterImpl awaiter) {
-    awaiter.install_executor(&executor);
-    return awaiter;
+  AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
+    LOG_TRACE("TaskPromise::await_transform - installing scheduler");
+    awaiter.install_scheduler(scheduler.lock());
+    return std::move(awaiter);
   }
 
   void unhandled_exception() {
@@ -55,129 +70,102 @@ struct TaskPromise {
     notify_callbacks();
   }
 
+  void on_completed(std::function<void(Result<ResultType>)>&& func) {
+    std::unique_lock lock(completion_lock);
+    if (result.has_value()) {
+      LOG_TRACE(
+          "TaskPromise::on_completed - task already completed, invoking "
+          "callback immediately");
+      lock.unlock();
+      func(*result);
+    } else {
+      LOG_TRACE(
+          "TaskPromise::on_completed - task not completed, storing callback");
+      completion_callbacks.push_back(std::move(func));
+    }
+  }
+
+  void set_scheduler(std::shared_ptr<AbstractScheduler> ex) { scheduler = ex; }
+
+  // CRTP: 通过派生类访问 get_return_object
+  Task<ResultType> get_return_object() {
+    return static_cast<Derived*>(this)->get_return_object_impl();
+  }
+
+  ResultType get_result() {
+    LOG_TRACE("TaskPromise::get_result - waiting for result");
+    std::unique_lock lock(completion_lock);
+    LOG_TRACE("TaskPromise::get_result - acquired lock");
+    if (!result.has_value()) {
+      LOG_TRACE("TaskPromise::get_result - waiting on condition variable");
+      completion.wait(lock);
+      LOG_TRACE("TaskPromise::get_result - woke up from wait");
+    }
+    LOG_TRACE("TaskPromise::get_result - returning result");
+    if constexpr (std::is_void_v<ResultType>) {
+      result->get_or_throw();
+      return;
+    } else {
+      return result->get_or_throw();
+    }
+  }
+
+ protected:
+  friend class TaskBase<ResultType, Task<ResultType>>;
+
+  std::optional<Result<ResultType>> result;
+  std::mutex completion_lock;
+  std::condition_variable completion;
+  std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
+  std::weak_ptr<AbstractScheduler> scheduler =
+      SchedulerManager::get_default_scheduler();
+
+  void notify_callbacks() {
+    LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks ",
+              completion_callbacks.size());
+    for (auto& callback : completion_callbacks) {
+      callback(*result);
+    }
+    completion_callbacks.clear();
+  }
+  std::weak_ptr<AbstractScheduler> get_scheduler() { return scheduler; }
+};
+
+// 通用模板 - 非 void 类型
+template <typename ResultType>
+struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
+  using Base = TaskPromiseBase<ResultType, TaskPromise<ResultType>>;
+  using Base::completion;
+  using Base::completion_lock;
+  using Base::notify_callbacks;
+  using Base::result;
+
+  // CRTP 实现
+  Task<ResultType> get_return_object_impl();
+
   void return_value(ResultType value) {
+    LOG_TRACE("TaskPromise::return_value - returning value");
     std::lock_guard lock(completion_lock);
     result = Result<ResultType>(std::move(value));
     completion.notify_all();
     notify_callbacks();
   }
-
-  // blocking for result or throw on exception
-  ResultType get_result() {
-    std::unique_lock lock(completion_lock);
-    if (!result.has_value()) {
-      completion.wait(lock);
-    }
-    return result->get_or_throw();
-  }
-
-  void on_completed(std::function<void(Result<ResultType>)>&& func) {
-    std::unique_lock lock(completion_lock);
-    if (result.has_value()) {
-      lock.unlock();
-      func(*result);
-    } else {
-      completion_callbacks.push_back(std::move(func));
-    }
-  }
-
- private:
-  std::optional<Result<ResultType>> result;
-
-  std::mutex completion_lock;
-  std::condition_variable completion;
-
-  std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
-
-  Executor executor;
-
-  void notify_callbacks() {
-    for (auto& callback : completion_callbacks) {
-      callback(*result);
-    }
-    completion_callbacks.clear();
-  }
 };
 
-template <typename Executor>
-struct TaskPromise<void, Executor> {
-  DispatchAwaiter initial_suspend() { return DispatchAwaiter{&executor}; }
-  auto final_suspend() noexcept { return std::suspend_always{}; }
-  Task<void, Executor> get_return_object() {
-    return Task{std::coroutine_handle<TaskPromise>::from_promise(*this)};
-  }
+// void 类型的特化
+template <>
+struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
+  using Base = TaskPromiseBase<void, TaskPromise<void>>;
 
-  template <typename _ResultType, typename _Executor>
-  TaskAwaiter<_ResultType, _Executor> await_transform(
-      Task<_ResultType, _Executor>&& task) {
-    return await_transform(
-        TaskAwaiter<_ResultType, _Executor>(std::move(task)));
-  }
-
-  template <typename _Rep, typename _Period>
-  SleepAwaiter await_transform(
-      std::chrono::duration<_Rep, _Period>&& duration) {
-    return await_transform(SleepAwaiter(
-        std::chrono::duration_cast<std::chrono::milliseconds>(duration)
-            .count()));
-  }
-
-  template <typename AwaiterImpl>
-    requires AwaiterImplRestriction<AwaiterImpl,
-                                    typename AwaiterImpl::ResultType>
-  AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
-    awaiter.install_executor(&executor);
-    return awaiter;
-  }
-
-  void get_result() {
-    // blocking for result or throw on exception
-    std::unique_lock lock(completion_lock);
-    if (!result.has_value()) {
-      completion.wait(lock);
-    }
-    result->get_or_throw();
-  }
-
-  void unhandled_exception() {
-    std::lock_guard lock(completion_lock);
-    result = Result<void>(std::current_exception());
-    completion.notify_all();
-    notify_callbacks();
-  }
+  // CRTP 实现
+  Task<void> get_return_object_impl();
 
   void return_void() {
+    LOG_TRACE("TaskPromise<void>::return_void - returning void");
     std::lock_guard lock(completion_lock);
     result = Result<void>();
     completion.notify_all();
     notify_callbacks();
-  }
-
-  void on_completed(std::function<void(Result<void>)>&& func) {
-    std::unique_lock lock(completion_lock);
-    if (result.has_value()) {
-      lock.unlock();
-      func(*result);
-    } else {
-      completion_callbacks.push_back(std::move(func));
-    }
-  }
-
- private:
-  std::optional<Result<void>> result;
-
-  std::mutex completion_lock;
-  std::condition_variable completion;
-
-  std::list<std::function<void(Result<void>)>> completion_callbacks;
-
-  Executor executor;
-
-  void notify_callbacks() {
-    for (auto& callback : completion_callbacks) {
-      callback(*result);
-    }
-    completion_callbacks.clear();
   }
 };
 
