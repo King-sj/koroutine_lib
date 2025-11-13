@@ -52,7 +52,8 @@ class TaskBase {
   }
 
   Derived& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) {
+    // FIXME: 貌似和 then 没什么区别？
+    handle_.promise().on_completed([func](auto _) {
       LOG_TRACE("Task::finally - invoking finally callback");
       func();
     });

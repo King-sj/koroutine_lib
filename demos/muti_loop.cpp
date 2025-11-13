@@ -73,6 +73,6 @@ int main() {
 
   //   Start two infinite loops on the same executor
   auto exec = std::make_shared<LooperExecutor>();
-  Runtime::join_all(loop_4(), loop_2(), loop_1(), loop_3(), watch());
+  Runtime::join_all(watch(), loop_1(), loop_2(), loop_3(), loop_4());
   return 0;
 }

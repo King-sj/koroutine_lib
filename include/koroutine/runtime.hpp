@@ -149,6 +149,59 @@ static void join_all(Tasks&&... tasks) {
     throw AggregateException(std::move(exceptions));
   }
 }
+
+namespace detail {
+// 不需要编译期递归实现；vector 版本在运行时处理
+// 保留命名空间以防未来扩展
+// (原来尝试用模板展开 vector 到参数包的实现是错误且不必要的)
+//
+}  // namespace detail
+
+// 注意: a partir daqui o namespace detail já foi fechado acima
+
+// 支持 vector<Task<...>> 形式的 join_all
+template <typename TaskType>
+static void join_all(std::vector<TaskType> tasks) {
+  LOG_TRACE("Runtime::join_all_from_vector - joining all tasks from vector");
+  if (tasks.empty()) return;
+
+  std::mutex mtx;
+  std::condition_variable cv;
+  std::atomic<size_t> remaining{tasks.size()};
+  std::vector<std::exception_ptr> exceptions;
+
+  // Attach callbacks to each task
+  for (auto& task : tasks) {
+    task.catching([&](std::exception& e) {
+      std::lock_guard lk(mtx);
+      exceptions.push_back(std::make_exception_ptr(e));
+      if (remaining.fetch_sub(1) == 1) cv.notify_one();
+    });
+
+    using T = std::decay_t<decltype(task)>;
+    if constexpr (std::is_same_v<T, Task<void>>) {
+      task.then([&]() {
+        if (remaining.fetch_sub(1) == 1) cv.notify_one();
+      });
+    } else {
+      task.then([&](auto) {
+        if (remaining.fetch_sub(1) == 1) cv.notify_one();
+      });
+    }
+  }
+
+  // Start all tasks
+  for (auto& task : tasks) task.start();
+
+  // Wait for completion
+  std::unique_lock lk(mtx);
+  cv.wait(lk, [&remaining]() { return remaining.load() == 0; });
+
+  if (!exceptions.empty()) {
+    throw AggregateException(std::move(exceptions));
+  }
+}
+
 };  // namespace Runtime
 
 /**
