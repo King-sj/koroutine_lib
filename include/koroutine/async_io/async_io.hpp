@@ -15,10 +15,10 @@
 
 namespace koroutine::async_io {
 // 打开文件(工厂函数)
-inline Task<std::unique_ptr<AsyncIOObject>> async_open(
+inline Task<std::shared_ptr<AsyncIOObject>> async_open(
     const std::string& path, std::ios::openmode mode) {
   static auto engine = IOEngine::create();  // 全局IO引擎
-  auto file = co_await AsyncFile::open(*engine, path, mode);
+  auto file = co_await AsyncFile::open(engine, path, mode);
   co_return std::move(file);
 }
 
@@ -26,27 +26,27 @@ inline Task<std::unique_ptr<AsyncIOObject>> async_open(
 inline Task<std::unique_ptr<AsyncSocket>> async_connect(const std::string& host,
                                                         uint16_t port) {
   static auto engine = IOEngine::create();
-  auto socket = co_await AsyncSocket::connect(*engine, host, port);
+  auto socket = co_await AsyncSocket::connect(engine, host, port);
   co_return std::move(socket);
 }
 
 // 创建Mock异步IO对象(工厂函数)
 inline Task<std::shared_ptr<MockAsyncIOObject>> create_mock_io_object() {
   static auto engine = IOEngine::create();
-  co_return std::make_shared<MockAsyncIOObject>(*engine);
+  co_return std::make_shared<MockAsyncIOObject>(engine);
 }
-
-// 实现 static std::unique_ptr<IOEngine> IOEngine::create()
-inline std::unique_ptr<IOEngine> IOEngine::create() {
+namespace detail {
 #ifdef __linux__
-  return std::make_unique<IoUringIOEngine>();
+inline static auto engine = std::make_shared<IoUringIOEngine>();
 #elif defined(__APPLE__)
-  return std::make_unique<KqueueIOEngine>();
+inline static auto engine = std::make_shared<KqueueIOEngine>();
 #elif defined(_WIN64)
-  return std::make_unique<IOCPIOEngine>();
+inline static auto engine = std::make_shared<IOCPIOEngine>();
 #else
-  static_assert(false, "Unsupported platform for IOEngine");
+static_assert(false, "Unsupported platform for IOEngine");
 #endif
-}
+}  // namespace detail
+// 实现 static std::unique_ptr<IOEngine> IOEngine::create()
+inline std::shared_ptr<IOEngine> IOEngine::create() { return detail::engine; }
 
 }  // namespace koroutine::async_io

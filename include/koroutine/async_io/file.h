@@ -16,6 +16,9 @@
 
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
+#include "koroutine/debug.h"
+#include "koroutine/task.hpp"
+
 namespace koroutine::async_io {
 
 // 将 std::ios::openmode 转换为平台相关的文件打开标志
@@ -70,9 +73,10 @@ inline int translate_mode(std::ios::openmode mode) {
 class AsyncFile : public AsyncIOObject,
                   public std::enable_shared_from_this<AsyncFile> {
  public:
-  static Task<std::unique_ptr<AsyncFile>> open(std::shared_ptr<IOEngine> engine,
+  static Task<std::shared_ptr<AsyncFile>> open(std::shared_ptr<IOEngine> engine,
                                                const std::string& path,
                                                std::ios::openmode mode) {
+    LOG_TRACE("AsyncFile::open - opening file: ", path);
     // 平台相关的文件打开操作
 #ifdef _WIN32
     // Windows 平台
@@ -109,24 +113,29 @@ class AsyncFile : public AsyncIOObject,
     }
 #endif
 #endif
-    co_return std::make_unique<AsyncFile>(engine, fd);
+    LOG_TRACE("AsyncFile::open - file opened successfully: ", path, fd);
+    co_return std::make_shared<AsyncFile>(engine, fd);
   }
 
-  AsyncFile(IOEngine& engine, intptr_t fd) : AsyncIOObject(engine), fd_(fd) {}
+  AsyncFile(std::shared_ptr<IOEngine> engine, intptr_t fd)
+      : AsyncIOObject(engine), fd_(fd) {}
 
   Task<size_t> read(void* buf, size_t size) override {
+    LOG_TRACE("AsyncFile::read - reading file: ", fd_);
     auto io_op = std::make_shared<AsyncIOOp>(OpType::READ, shared_from_this(),
                                              buf, size);
     co_return co_await IOAwaiter<size_t>{io_op};
   }
 
   Task<size_t> write(const void* buf, size_t size) override {
+    LOG_TRACE("AsyncFile::write - writing file: ", fd_);
     auto io_op = std::make_shared<AsyncIOOp>(OpType::WRITE, shared_from_this(),
                                              const_cast<void*>(buf), size);
     co_return co_await IOAwaiter<size_t>{io_op};
   }
 
   Task<void> close() override {
+    LOG_TRACE("AsyncFile::close - closing file: ", fd_);
     auto io_op = std::make_shared<AsyncIOOp>(OpType::CLOSE, shared_from_this(),
                                              nullptr, 0);
     co_await IOAwaiter<void>{io_op};

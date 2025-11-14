@@ -19,15 +19,16 @@
 
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
+#include "koroutine/task.hpp"
 
 namespace koroutine::async_io {
 
 class AsyncSocket : public AsyncIOObject,
                     public std::enable_shared_from_this<AsyncSocket> {
  public:
-  static Task<std::unique_ptr<AsyncSocket>> connect(IOEngine& engine,
-                                                    const std::string& host,
-                                                    uint16_t port) {
+  static Task<std::unique_ptr<AsyncSocket>> connect(
+      std::shared_ptr<IOEngine> engine, const std::string& host,
+      uint16_t port) {
     // 平台相关的socket连接操作
 #ifdef _WIN32
     // Windows 平台

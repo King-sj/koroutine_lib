@@ -8,6 +8,7 @@
 #include <system_error>
 
 #include "koroutine/async_io/engin.h"
+#include "koroutine/debug.h"
 
 namespace koroutine::async_io {
 
@@ -21,14 +22,19 @@ KqueueIOEngine::KqueueIOEngine() : running_(false) {
 }
 
 KqueueIOEngine::~KqueueIOEngine() {
+  LOG_TRACE("KqueueIOEngine::~KqueueIOEngine - destroying KqueueIOEngine");
   stop();
+  LOG_TRACE("KqueueIOEngine::~KqueueIOEngine - kqueue closed");
   if (kqueue_fd_ != -1) {
     ::close(kqueue_fd_);
   }
 }
 
 void KqueueIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
+  LOG_TRACE("KqueueIOEngine::submit - submitting IO operation of type ",
+            static_cast<int>(op->type));
   std::lock_guard<std::mutex> lock(ops_mutex_);
+  LOG_TRACE("KqueueIOEngine::submit - operation queued");
   pending_ops_.push(op);
 }
 
@@ -37,10 +43,11 @@ void KqueueIOEngine::run() {
 
   constexpr int MAX_EVENTS = 64;
   struct kevent events[MAX_EVENTS];
-
+  LOG_INFO("KqueueIOEngine::run - starting event loop");
   while (running_.load()) {
     // 处理待提交的操作
     {
+      LOG_TRACE("KqueueIOEngine::run - processing pending operations");
       std::lock_guard<std::mutex> lock(ops_mutex_);
       while (!pending_ops_.empty()) {
         auto op = pending_ops_.front();
@@ -73,19 +80,23 @@ void KqueueIOEngine::run() {
 
     if (nev < 0) {
       if (errno == EINTR) {
+        LOG_DEBUG("KqueueIOEngine::run - kevent interrupted by signal");
         continue;  // 被信号中断，继续循环
       }
+      LOG_ERROR("KqueueIOEngine::run - kevent error: ", errno);
       // 其他错误
       throw std::system_error(errno, std::generic_category(), "kevent failed");
     }
 
     // 处理就绪的事件
+    LOG_TRACE("KqueueIOEngine::run - processing event ", nev);
     for (int i = 0; i < nev; ++i) {
       auto& event = events[i];
       intptr_t fd = static_cast<intptr_t>(event.ident);
 
       auto it = active_ops_.find(fd);
       if (it == active_ops_.end()) {
+        LOG_WARN("KqueueIOEngine::run - no active operation for fd ", fd);
         continue;  // 找不到对应的操作，跳过
       }
 
@@ -95,6 +106,7 @@ void KqueueIOEngine::run() {
       if (event.flags & EV_ERROR) {
         op->error = std::make_error_code(std::errc::io_error);
         op->actual_size = 0;
+        LOG_ERROR("KqueueIOEngine::run - IO error occurred for fd ", fd);
       } else {
         // 根据操作类型执行实际的 IO
         if (op->type == OpType::READ) {
@@ -120,16 +132,22 @@ void KqueueIOEngine::run() {
       active_ops_.erase(it);
 
       // 完成操作，恢复协程
+      LOG_TRACE("KqueueIOEngine::run - completing IO operation for fd ", fd);
       complete(op);
+      LOG_TRACE("KqueueIOEngine::run - IO operation completed for fd ", fd);
     }
   }
 }
 
-void KqueueIOEngine::stop() { running_.store(false); }
+void KqueueIOEngine::stop() {
+  LOG_INFO("KqueueIOEngine::stop - stopping event loop");
+  running_.store(false);
+}
 
 bool KqueueIOEngine::is_running() { return running_.load(); }
 
 void KqueueIOEngine::process_read(std::shared_ptr<AsyncIOOp> op) {
+  LOG_INFO("KqueueIOEngine::process_read - processing read operation");
   intptr_t fd = op->io_object->native_handle();
 
   // 注册读事件到 kqueue
@@ -147,6 +165,7 @@ void KqueueIOEngine::process_read(std::shared_ptr<AsyncIOOp> op) {
 }
 
 void KqueueIOEngine::process_write(std::shared_ptr<AsyncIOOp> op) {
+  LOG_INFO("KqueueIOEngine::process_write - processing write operation");
   intptr_t fd = op->io_object->native_handle();
 
   // 注册写事件到 kqueue
@@ -164,6 +183,7 @@ void KqueueIOEngine::process_write(std::shared_ptr<AsyncIOOp> op) {
 }
 
 void KqueueIOEngine::process_close(std::shared_ptr<AsyncIOOp> op) {
+  LOG_INFO("KqueueIOEngine::process_close - processing close operation");
   intptr_t fd = op->io_object->native_handle();
 
   // 从 kqueue 中删除该文件描述符的所有监听

@@ -16,11 +16,9 @@ class IOEngine {
   virtual void stop() = 0;        // 停止IO引擎的事件循环
   virtual bool is_running() = 0;  // 检查IO引擎是否在运行
 
-  static std::unique_ptr<IOEngine> create();  // 工厂方法：创建平台相关引擎
+  static std::shared_ptr<IOEngine> create();  // 工厂方法：创建平台相关引擎
  protected:
   // 完成IO操作后唤醒协程
-  void complete(std::shared_ptr<AsyncIOOp> op) {
-    op->coro_handle.resume();  // 恢复协程
-  }
+  void complete(std::shared_ptr<AsyncIOOp> op) { op->complete(); }
 };
 }  // namespace koroutine::async_io

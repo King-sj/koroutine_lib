@@ -21,8 +21,8 @@ class AsyncIOOp {
         size(sz),
         actual_size(0),
         error() {}
-  // 回调函数：由IO引擎调用
-  void operator()() {
+
+  void complete() {
     if (!error) {
       // 操作成功，恢复协程
       coro_handle.resume();

@@ -20,8 +20,8 @@ struct IOAwaiter : public AwaiterBase<T> {
  protected:
   void after_suspend() override {
     LOG_INFO("IOAwaiter::after_suspend - IO operation submitted");
-    io_op->coro_handle = this->_handle;
-    io_op->io_object->engine_.submit(io_op);
+    io_op->coro_handle = this->_caller_handle;
+    io_op->io_object->engine_->submit(io_op);
   }
 
   void before_resume() override {
@@ -32,9 +32,9 @@ struct IOAwaiter : public AwaiterBase<T> {
     if constexpr (std::is_same_v<T, void>) {
       this->_result = Result<void>();
     } else if constexpr (std::is_same_v<T, size_t>) {
-      this->_result = Result<size_t>(io_op->actual_size);
+      this->_result = Result<size_t>(std::move(io_op->actual_size));
     } else {
-      this->_result = Result<T>(*static_cast<T*>(io_op->buffer));
+      this->_result = Result<T>(std::move(*static_cast<T*>(io_op->buffer)));
     }
   }
 };

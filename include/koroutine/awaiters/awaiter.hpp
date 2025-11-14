@@ -17,7 +17,7 @@ class AwaiterBaseCRTP {
   // move constructor
   AwaiterBaseCRTP(AwaiterBaseCRTP&& awaiter) noexcept
       : _scheduler(std::move(awaiter._scheduler)),
-        _handle(std::move(awaiter._handle)),
+        _caller_handle(std::move(awaiter._caller_handle)),
         _result(std::move(awaiter._result)) {
     LOG_INFO("AwaiterBaseCRTP::move constructor - moved awaiter");
   }
@@ -27,13 +27,14 @@ class AwaiterBaseCRTP {
     return false;
   }
 
-  void await_suspend(std::coroutine_handle<> handle) {
+  bool await_suspend(std::coroutine_handle<> caller_handle) {
     LOG_INFO(
         "AwaiterBase::await_suspend - suspending coroutine, and storing "
         "the caller handle  ",
-        handle.address());
-    this->_handle = handle;
+        caller_handle.address());
+    this->_caller_handle = caller_handle;
     static_cast<Derived*>(this)->after_suspend();
+    return true;  // 确实要挂起，保持awaiter存活
   }
 
   void install_scheduler(std::shared_ptr<AbstractScheduler> scheduler) {
@@ -46,7 +47,7 @@ class AwaiterBaseCRTP {
 
  protected:
   void dispatch(std::function<void()>&& f) {
-    if (!_handle) {
+    if (!_caller_handle) {
       LOG_ERROR(
           "AwaiterBase::dispatch - no coroutine handle set, cannot dispatch.");
       return;
@@ -61,14 +62,14 @@ class AwaiterBaseCRTP {
     }
   }
   void resume_unsafe() {
-    dispatch([this]() { _handle.resume(); });
+    dispatch([this]() { _caller_handle.resume(); });
   }
 
  protected:
   std::optional<Result<R>> _result{};
   std::shared_ptr<AbstractScheduler> _scheduler = nullptr;
   //   存储调用者的协程句柄，用于awaiter执行结束后恢复调用者协程
-  std::coroutine_handle<> _handle = nullptr;
+  std::coroutine_handle<> _caller_handle = nullptr;
 };
 
 // 通用模板 - 非 void 类型
@@ -79,7 +80,7 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
  public:
   using Base = AwaiterBaseCRTP<R, AwaiterBase<R>>;
   using ResultType = R;
-  using Base::_handle;
+  using Base::_caller_handle;
   using Base::_result;
   using Base::_scheduler;
   using Base::dispatch;
@@ -103,14 +104,14 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
   void resume(R value) {
     dispatch([this, value]() {
       _result = Result<R>(static_cast<R>(value));
-      _handle.resume();
+      _caller_handle.resume();
     });
   }
 
   void resume_exception(std::exception_ptr&& e) {
     dispatch([this, e]() {
       _result = Result<R>(static_cast<std::exception_ptr>(e));
-      _handle.resume();
+      _caller_handle.resume();
     });
   }
   virtual void after_suspend() {
@@ -131,7 +132,7 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
  public:
   using Base = AwaiterBaseCRTP<void, AwaiterBase<void>>;
   using ResultType = void;
-  using Base::_handle;
+  using Base::_caller_handle;
   using Base::_result;
   using Base::_scheduler;
   using Base::dispatch;
@@ -153,14 +154,14 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
   void resume() {
     dispatch([this]() {
       _result = Result<void>();
-      _handle.resume();
+      _caller_handle.resume();
     });
   }
 
   void resume_exception(std::exception_ptr&& e) {
     dispatch([this, e]() {
       _result = Result<void>(static_cast<std::exception_ptr>(e));
-      _handle.resume();
+      _caller_handle.resume();
     });
   }
   virtual void after_suspend() {

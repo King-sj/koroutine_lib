@@ -70,7 +70,7 @@ struct TaskPromiseBase {
     notify_callbacks();
   }
 
-  void on_completed(std::function<void(Result<ResultType>)>&& func) {
+  void on_completed(std::function<void(Result<ResultType>&)>&& func) {
     std::unique_lock lock(completion_lock);
     if (result.has_value()) {
       LOG_TRACE(
@@ -86,6 +86,11 @@ struct TaskPromiseBase {
   }
 
   void set_scheduler(std::shared_ptr<AbstractScheduler> ex) { scheduler = ex; }
+
+  bool is_started() const { return started; }
+  void set_started() { started = true; }
+
+  std::weak_ptr<AbstractScheduler> get_scheduler() { return scheduler; }
 
   // CRTP: 通过派生类访问 get_return_object
   Task<ResultType> get_return_object() {
@@ -116,19 +121,21 @@ struct TaskPromiseBase {
   std::optional<Result<ResultType>> result;
   std::mutex completion_lock;
   std::condition_variable completion;
-  std::list<std::function<void(Result<ResultType>)>> completion_callbacks;
+  std::list<std::function<void(Result<ResultType>&)>> completion_callbacks;
   std::weak_ptr<AbstractScheduler> scheduler =
       SchedulerManager::get_default_scheduler();
+  bool started = false;  // 防止重复启动
 
   void notify_callbacks() {
     LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks ",
               completion_callbacks.size());
-    for (auto& callback : completion_callbacks) {
-      callback(*result);
+    if (result.has_value()) {
+      for (auto& cb : completion_callbacks) {
+        cb(*result);  // 传递引用，回调可以决定是移动还是拷贝
+      }
     }
     completion_callbacks.clear();
   }
-  std::weak_ptr<AbstractScheduler> get_scheduler() { return scheduler; }
 };
 
 // 通用模板 - 非 void 类型

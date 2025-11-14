@@ -20,3 +20,4 @@
 - [ ] 优先级调度
 - [ ] awaitable list
     - [ ] await gather(list of awaitables)
+- [ ] conditonal varialble 支持条件等待

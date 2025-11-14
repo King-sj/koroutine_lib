@@ -1,5 +1,4 @@
 #pragma once
-#include "koroutine/awaiters/io_awaiter.hpp"
 #include "koroutine/task.hpp"
 namespace koroutine::async_io {
 // enum class IOObjectType { File, Socket, Pipe, Timer, Signal, Other };
@@ -16,6 +15,9 @@ class IOEngine;
 
 class AsyncIOOp;
 
+template <typename T>
+struct IOAwaiter;
+
 class AsyncIOObject {
  public:
   virtual ~AsyncIOObject() = default;
@@ -29,7 +31,8 @@ class AsyncIOObject {
  protected:
   friend class IOEngine;
 
-  friend class IOAwaiter;
+  template <typename T>
+  friend struct IOAwaiter;
 
   explicit AsyncIOObject(std::shared_ptr<IOEngine> engine)
       : engine_(std::move(engine)) {}

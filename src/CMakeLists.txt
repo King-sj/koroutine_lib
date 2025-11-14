@@ -1,5 +1,5 @@
-# find all .cpp files in the src directory
-file(GLOB SOURCE_FILES "*.cpp")
+# find all .cpp files in the src directory and subdirectories
+file(GLOB_RECURSE SOURCE_FILES "*.cpp")
 
 # 生成静态库
 add_library(koroutinelib_static STATIC
