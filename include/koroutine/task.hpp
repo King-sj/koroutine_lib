@@ -74,6 +74,28 @@ class TaskBase {
     return static_cast<Derived&>(*this);
   }
 
+  /**
+   * @brief 设置取消令牌
+   * @param token 取消令牌
+   * @return 返回任务自身以支持链式调用
+   *
+   * 使用示例:
+   * @code
+   * CancellationToken token;
+   * auto task = my_async_operation()
+   *   .with_cancellation(token)
+   *   .start();
+   *
+   * // 稍后取消
+   * token.cancel();
+   * @endcode
+   */
+  Derived& with_cancellation(CancellationToken token) {
+    LOG_TRACE("Task::with_cancellation - setting cancellation token");
+    handle_.promise().set_cancellation_token(token);
+    return static_cast<Derived&>(*this);
+  }
+
   void start() {
     // 防止重复启动
     if (handle_.promise().is_started()) {
@@ -91,13 +113,10 @@ class TaskBase {
     }
     LOG_TRACE("Task::start - starting task with scheduler, handle: ",
               handle_.address());
-    scheduler->schedule(
-        [h = handle_]() {
-          LOG_TRACE("Task::start - resuming coroutine, handle: ", h.address());
-          h.resume();
-          LOG_TRACE("Task::start - coroutine resumed, done: ", h.done());
-        },
-        0);
+
+    // 使用 ScheduleRequest 调度协程
+    ScheduleMetadata meta(ScheduleMetadata::Priority::Normal, "task_start");
+    scheduler->schedule(ScheduleRequest(handle_, std::move(meta)), 0);
   }
 
  protected:

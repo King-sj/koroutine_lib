@@ -3,11 +3,12 @@
 #include <functional>
 #include <list>
 #include <mutex>
+#include <optional>
 
 #include "awaiters/awaiter.hpp"
-#include "awaiters/dispatch_awaiter.hpp"
 #include "awaiters/sleep_awaiter.hpp"
 #include "awaiters/task_awaiter.hpp"
+#include "cancellation.hpp"
 #include "coroutine_common.h"
 #include "scheduler_manager.h"
 
@@ -58,15 +59,43 @@ struct TaskPromiseBase {
     requires AwaiterImplRestriction<AwaiterImpl,
                                     typename AwaiterImpl::ResultType>
   AwaiterImpl await_transform(AwaiterImpl&& awaiter) {
-    LOG_TRACE("TaskPromise::await_transform - installing scheduler");
+    LOG_TRACE(
+        "TaskPromise::await_transform - installing scheduler and checking "
+        "cancellation");
+
+    // 检查取消状态
+    if (cancel_token_ && cancel_token_->is_cancelled()) {
+      LOG_WARN("TaskPromise::await_transform - operation cancelled");
+      throw OperationCancelledException();
+    }
+
     awaiter.install_scheduler(scheduler.lock());
     return std::move(awaiter);
+  }
+
+  // 通用的 await_transform，支持任意 awaitable（如 ScheduleAwaiter,
+  // DispatchAwaiter 等）
+  template <typename Awaitable>
+  Awaitable&& await_transform(Awaitable&& awaitable) {
+    LOG_TRACE("TaskPromise::await_transform - generic awaitable");
+
+    // 检查取消状态
+    if (cancel_token_ && cancel_token_->is_cancelled()) {
+      LOG_WARN("TaskPromise::await_transform - operation cancelled");
+      throw OperationCancelledException();
+    }
+
+    return std::forward<Awaitable>(awaitable);
   }
 
   void unhandled_exception() {
     std::lock_guard lock(completion_lock);
     result = Result<ResultType>(std::current_exception());
     completion.notify_all();
+
+    // 恢复 continuation
+    resume_continuation();
+
     notify_callbacks();
   }
 
@@ -91,6 +120,68 @@ struct TaskPromiseBase {
   void set_started() { started = true; }
 
   std::weak_ptr<AbstractScheduler> get_scheduler() { return scheduler; }
+
+  /**
+   * @brief 设置 continuation - 当前任务完成后要恢复的协程
+   * @param handle 等待当前任务的协程句柄
+   */
+  void set_continuation(std::coroutine_handle<> handle) {
+    LOG_TRACE("TaskPromise::set_continuation - setting continuation handle: ",
+              handle.address());
+    continuation_ = handle;
+  }
+
+  /**
+   * @brief 设置取消令牌
+   * @param token 取消令牌
+   *
+   * 当令牌被取消时，任务会在下一个 co_await 点检查并抛出
+   * OperationCancelledException。
+   */
+  void set_cancellation_token(CancellationToken token) {
+    LOG_TRACE(
+        "TaskPromise::set_cancellation_token - setting cancellation token");
+    cancel_token_ = token;
+
+    // 注册取消回调
+    // 注意：使用 weak reference 避免循环引用和生命周期问题
+    auto weak_scheduler = scheduler;
+    auto continuation_handle = &continuation_;
+    auto result_ptr = &result;
+    auto lock_ptr = &completion_lock;
+    auto cv_ptr = &completion;
+
+    token.on_cancel([weak_scheduler, continuation_handle, result_ptr, lock_ptr,
+                     cv_ptr]() {
+      LOG_INFO("TaskPromise - cancellation requested");
+      // 设置异常结果
+      {
+        std::lock_guard lock(*lock_ptr);
+        if (!result_ptr->has_value()) {
+          *result_ptr = Result<ResultType>(
+              std::make_exception_ptr(OperationCancelledException()));
+          cv_ptr->notify_all();
+        }
+      }
+
+      // 如果有 continuation，立即恢复（让它处理取消）
+      if (*continuation_handle) {
+        auto sched = weak_scheduler.lock();
+        if (sched) {
+          sched->schedule(
+              ScheduleRequest(*continuation_handle,
+                              ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                               "cancellation_continuation")),
+              0);
+        } else {
+          LOG_ERROR(
+              "TaskPromise - cancellation: no scheduler available to resume "
+              "continuation");
+          // 不再直接 resume，必须有调度器
+        }
+      }
+    });
+  }
 
   // CRTP: 通过派生类访问 get_return_object
   Task<ResultType> get_return_object() {
@@ -126,6 +217,12 @@ struct TaskPromiseBase {
       SchedulerManager::get_default_scheduler();
   bool started = false;  // 防止重复启动
 
+  // Continuation: 当前任务完成后要恢复的协程句柄
+  std::coroutine_handle<> continuation_ = nullptr;
+
+  // Cancellation token: 用于协作式取消
+  std::optional<CancellationToken> cancel_token_;
+
   void notify_callbacks() {
     LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks ",
               completion_callbacks.size());
@@ -135,6 +232,31 @@ struct TaskPromiseBase {
       }
     }
     completion_callbacks.clear();
+  }
+
+ public:
+  /**
+   * @brief 恢复 continuation（通过调度器）
+   */
+  void resume_continuation() {
+    if (continuation_) {
+      LOG_TRACE("TaskPromise::resume_continuation - resuming continuation: ",
+                continuation_.address());
+      auto sched = scheduler.lock();
+      if (sched) {
+        // 通过调度器恢复 continuation
+        ScheduleMetadata meta(
+            ScheduleMetadata::Priority::Normal,
+            "continuation_" + std::to_string((uintptr_t)this));
+        sched->schedule(ScheduleRequest(continuation_, std::move(meta)), 0);
+      } else {
+        LOG_WARN(
+            "TaskPromise::resume_continuation - no scheduler available, "
+            "resuming directly");
+        continuation_.resume();
+      }
+      continuation_ = nullptr;  // 避免重复恢复
+    }
   }
 };
 
@@ -155,6 +277,10 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
     std::lock_guard lock(completion_lock);
     result = Result<ResultType>(std::move(value));
     completion.notify_all();
+
+    // 恢复 continuation
+    Base::resume_continuation();
+
     notify_callbacks();
   }
 };
@@ -172,6 +298,10 @@ struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
     std::lock_guard lock(completion_lock);
     result = Result<void>();
     completion.notify_all();
+
+    // 恢复 continuation
+    Base::resume_continuation();
+
     notify_callbacks();
   }
 };

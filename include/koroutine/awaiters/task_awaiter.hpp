@@ -39,14 +39,11 @@ struct TaskAwaiter : public AwaiterBase<ResultType> {
 
  protected:
   void after_suspend() override {
-    LOG_TRACE("TaskAwaiter::after_suspend - suspending on task");
-    // TaskAwaiter 不使用 on_completed，而是使用 finally
-    // finally 只是通知完成，不传递 Result
-    // 在 before_resume 时再从 Promise 直接获取 Result
-    task_.finally([this]() {
-      LOG_TRACE("TaskAwaiter::after_suspend - task completed, resuming");
-      this->resume_unsafe();
-    });
+    LOG_TRACE(
+        "TaskAwaiter::after_suspend - setting continuation and starting task");
+    // 使用新的 continuation 机制
+    // 当 task 完成时，会通过调度器自动恢复我们的协程
+    task_.handle_.promise().set_continuation(this->_caller_handle);
     task_.start();
   }
 

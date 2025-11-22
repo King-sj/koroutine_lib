@@ -46,23 +46,16 @@ class AwaiterBaseCRTP {
   }
 
  protected:
-  void dispatch(std::function<void()>&& f) {
-    if (!_caller_handle) {
-      LOG_ERROR(
-          "AwaiterBase::dispatch - no coroutine handle set, cannot dispatch.");
-      return;
-    }
-    if (_scheduler) {
-      _scheduler->schedule(std::move(f), 0);
-    } else {
-      LOG_ERROR(
-          "AwaiterBase::dispatch - no scheduler bound, executing on current "
-          "thread.");
-      f();
-    }
-  }
   void resume_unsafe() {
-    dispatch([this]() { _caller_handle.resume(); });
+    if (_scheduler) {
+      // 直接使用 ScheduleRequest 调度协程恢复
+      ScheduleMetadata meta(ScheduleMetadata::Priority::Normal,
+                            "awaiter_resume");
+      _scheduler->schedule(ScheduleRequest(_caller_handle, std::move(meta)), 0);
+    } else {
+      LOG_ERROR("AwaiterBase::resume_unsafe - no scheduler, resuming directly");
+      _caller_handle.resume();
+    }
   }
 
  protected:
@@ -83,7 +76,7 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
   using Base::_caller_handle;
   using Base::_result;
   using Base::_scheduler;
-  using Base::dispatch;
+  using Base::resume_unsafe;  // 暴露 resume_unsafe 给派生类
 
   // default constructor
   AwaiterBase() = default;
@@ -102,17 +95,13 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
 
  protected:
   void resume(R value) {
-    dispatch([this, value]() {
-      _result = Result<R>(static_cast<R>(value));
-      _caller_handle.resume();
-    });
+    _result = Result<R>(static_cast<R>(value));
+    resume_unsafe();
   }
 
   void resume_exception(std::exception_ptr&& e) {
-    dispatch([this, e]() {
-      _result = Result<R>(static_cast<std::exception_ptr>(e));
-      _caller_handle.resume();
-    });
+    _result = Result<R>(static_cast<std::exception_ptr>(e));
+    resume_unsafe();
   }
   virtual void after_suspend() {
     LOG_INFO(
@@ -135,7 +124,7 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
   using Base::_caller_handle;
   using Base::_result;
   using Base::_scheduler;
-  using Base::dispatch;
+  using Base::resume_unsafe;
 
   // default constructor
   AwaiterBase() = default;
@@ -152,17 +141,13 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
 
  protected:
   void resume() {
-    dispatch([this]() {
-      _result = Result<void>();
-      _caller_handle.resume();
-    });
+    _result = Result<void>();
+    resume_unsafe();
   }
 
   void resume_exception(std::exception_ptr&& e) {
-    dispatch([this, e]() {
-      _result = Result<void>(static_cast<std::exception_ptr>(e));
-      _caller_handle.resume();
-    });
+    _result = Result<void>(static_cast<std::exception_ptr>(e));
+    resume_unsafe();
   }
   virtual void after_suspend() {
     LOG_INFO(

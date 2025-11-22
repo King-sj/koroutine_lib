@@ -8,19 +8,30 @@ class SimpleScheduler : public AbstractScheduler {
   SimpleScheduler() : _executor(std::make_shared<LooperExecutor>()) {}
   ~SimpleScheduler() override { _executor->shutdown(); }
 
-  virtual void schedule(std::function<void()> func,
-                        long long delay_ms = 0) override {
-    // FIXME: 这里的日志没能输出出来
-    LOG_TRACE("SimpleScheduler::schedule - scheduling task with delay: ",
+  // 引入基类的 schedule(long long) 方法
+  using AbstractScheduler::dispatch_to;
+  using AbstractScheduler::schedule;
+
+  // 实现核心接口：调度 ScheduleRequest
+  void schedule(ScheduleRequest request, long long delay_ms = 0) override {
+    LOG_TRACE("SimpleScheduler::schedule - scheduling request with delay: ",
               delay_ms);
-    if (delay_ms > 0) {
-      LOG_TRACE(
-          "SimpleScheduler::schedule - scheduling delayed task with delay: ",
-          delay_ms);
-      _executor->execute_delayed(std::move(func), delay_ms);
+
+    if (!request) {
+      LOG_ERROR("SimpleScheduler::schedule - invalid request (null handle)");
       return;
     }
-    _executor->execute(std::move(func));
+
+    if (delay_ms > 0) {
+      LOG_TRACE(
+          "SimpleScheduler::schedule - scheduling delayed request with delay: ",
+          delay_ms);
+      _executor->execute_delayed(
+          [req = std::move(request)]() mutable { req.resume(); }, delay_ms);
+    } else {
+      _executor->execute(
+          [req = std::move(request)]() mutable { req.resume(); });
+    }
   }
 
  private:

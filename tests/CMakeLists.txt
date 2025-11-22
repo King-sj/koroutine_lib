@@ -8,6 +8,7 @@ add_executable(test_unit
     unit/test_channel.cpp
     unit/test_sync.cpp
     unit/test_async_io.cpp
+    unit/test_new_features.cpp
 )
 
 # 链接库和gtest

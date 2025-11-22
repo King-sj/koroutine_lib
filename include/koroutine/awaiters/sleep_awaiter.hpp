@@ -21,14 +21,17 @@ struct SleepAwaiter : public AwaiterBase<void> {
     if (_scheduler) {
       LOG_TRACE("SleepAwaiter::after_suspend - scheduling resume after ",
                 _duration, " ms");
-      // use scheduler's delayed execution if available
-      _scheduler->schedule([this] { this->resume(); }, _duration);
+      // 使用 ScheduleRequest 调度恢复
+      ScheduleMetadata meta(ScheduleMetadata::Priority::Normal,
+                            "sleep_awaiter");
+      _scheduler->schedule(ScheduleRequest(_caller_handle, std::move(meta)),
+                           _duration);
     } else {
-      LOG_WARN(
-          "SleepAwaiter::after_suspend - no scheduler bound, using "
-          "TimerScheduler");
-      static TimerScheduler scheduler;
-      scheduler.schedule([this] { this->resume(); }, _duration);
+      LOG_ERROR(
+          "SleepAwaiter::after_suspend - no scheduler bound, cannot sleep!");
+      // 不再直接 resume，必须有调度器
+      throw std::runtime_error(
+          "SleepAwaiter::after_suspend - no scheduler bound");
     }
   }
 
