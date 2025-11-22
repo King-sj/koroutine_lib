@@ -1,4 +1,6 @@
 #pragma once
+#include <cstring>
+
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
 namespace koroutine::async_io {
