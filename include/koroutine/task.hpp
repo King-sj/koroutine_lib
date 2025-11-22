@@ -20,7 +20,7 @@ class TaskBase {
 
   ~TaskBase() {
     LOG_INFO("TaskBase::~TaskBase - destroying, handle address: ",
-             handle_ ? handle_.address() : nullptr);
+             handle_ ? handle_.address() : nullptr, " this=", (void*)this);
     if (handle_ && handle_.address() != nullptr) {
       LOG_INFO("TaskBase::~TaskBase - destroying coroutine handle");
       handle_.destroy();
@@ -37,7 +37,8 @@ class TaskBase {
       : handle_(std::exchange(task.handle_, nullptr)) {
     LOG_INFO("TaskBase::move constructor - moved TaskBase<ResultType>, from: ",
              handle_ ? handle_.address() : nullptr,
-             " source now: ", task.handle_ ? task.handle_.address() : nullptr);
+             " source now: ", task.handle_ ? task.handle_.address() : nullptr,
+             " this=", (void*)this, " source=", (void*)&task);
   }
 
   TaskBase& operator=(TaskBase&& other) noexcept {
@@ -51,21 +52,22 @@ class TaskBase {
   }
 
   Derived& catching(std::function<void(std::exception&)>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      try {
-        LOG_TRACE("Task::catching - checking for exception");
-        result.get_or_throw();
-      } catch (std::exception& e) {
-        LOG_TRACE("Task::catching - exception caught, invoking callback");
-        func(e);
+    handle_.promise().on_completed([func](Result<ResultType>& result) {
+      // 不调用 get_or_throw()，只检查是否有异常
+      if (result.has_exception()) {
+        try {
+          result.rethrow_exception();
+        } catch (std::exception& e) {
+          LOG_TRACE("Task::catching - exception caught, invoking callback");
+          func(e);
+        }
       }
     });
     return static_cast<Derived&>(*this);
   }
 
   Derived& finally(std::function<void()>&& func) {
-    // FIXME: 貌似和 then 没什么区别？
-    handle_.promise().on_completed([func](auto _) {
+    handle_.promise().on_completed([func](Result<ResultType>& _) {
       LOG_TRACE("Task::finally - invoking finally callback");
       func();
     });
@@ -73,6 +75,13 @@ class TaskBase {
   }
 
   void start() {
+    // 防止重复启动
+    if (handle_.promise().is_started()) {
+      LOG_ERROR("Task::start - task already started, ignoring duplicate start");
+      return;
+    }
+    handle_.promise().set_started();
+
     std::shared_ptr<AbstractScheduler> scheduler =
         handle_.promise().get_scheduler().lock();
     if (!scheduler) {
@@ -80,12 +89,13 @@ class TaskBase {
       scheduler = SchedulerManager::get_default_scheduler();
       handle_.promise().set_scheduler(scheduler);
     }
-    LOG_TRACE("Task::start - starting task with scheduler");
+    LOG_TRACE("Task::start - starting task with scheduler, handle: ",
+              handle_.address());
     scheduler->schedule(
         [h = handle_]() {
-          LOG_TRACE("Task::start - resuming coroutine");
+          LOG_TRACE("Task::start - resuming coroutine, handle: ", h.address());
           h.resume();
-          LOG_TRACE("Task::start - coroutine resumed");
+          LOG_TRACE("Task::start - coroutine resumed, done: ", h.done());
         },
         0);
   }
@@ -113,13 +123,16 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
   ~Task() = default;
 
   Task& then(std::function<void(ResultType)>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      try {
-        LOG_TRACE("Task::then - invoking then callback");
-        func(result.get_or_throw());
-      } catch (std::exception& e) {
-        LOG_WARN("Task::then - exception in then callback: ", e.what());
-        // ignore.
+    handle_.promise().on_completed([func](Result<ResultType>& result) {
+      if (!result.has_exception()) {
+        try {
+          LOG_TRACE("Task::then - invoking then callback");
+          // 注意：这里调用 get_or_throw() 会移动值
+          // 如果有多个 then 回调，只有第一个能拿到值
+          func(result.get_or_throw());
+        } catch (std::exception& e) {
+          LOG_WARN("Task::then - exception in then callback: ", e.what());
+        }
       }
     });
     return *this;
@@ -154,14 +167,15 @@ class Task<void> : public TaskBase<void, Task<void>> {
   ~Task() = default;
 
   Task& then(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](auto result) {
-      try {
-        LOG_TRACE("Task<void>::then - invoking then callback");
-        result.get_or_throw();
-        func();
-      } catch (std::exception& e) {
-        LOG_WARN("Task<void>::then - exception in then callback: ", e.what());
-        // ignore.
+    handle_.promise().on_completed([func](Result<void>& result) {
+      if (!result.has_exception()) {
+        try {
+          LOG_TRACE("Task<void>::then - invoking then callback");
+          result.get_or_throw();
+          func();
+        } catch (std::exception& e) {
+          LOG_WARN("Task<void>::then - exception in then callback: ", e.what());
+        }
       }
     });
     return *this;

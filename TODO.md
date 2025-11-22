@@ -20,3 +20,58 @@
 - [ ] 优先级调度
 - [ ] awaitable list
     - [ ] await gather(list of awaitables)
+- [ ] conditonal varialble 支持条件等待
+- [ ] 使用 std::expected 替代异常处理
+- [ ] 优化 then、catch、finally 等回调链的实现
+- [ ] 协程底层唤醒 father task 不再依赖 finally 机制，而是通过专门的 awaiter 实现
+- [ ] 提供协程调试工具
+    - [ ] 堆栈跟踪
+    - [ ] 任务状态监控
+- [ ] 性能优化
+    - [ ] 减少内存分配
+    - [ ] 减少上下文切换
+    - [ ] 提高缓存命中率
+- [ ] 支持协程间通信机制
+    - [x] 通道 (Channels)
+    - [ ] 消息队列 (Message Queues)
+- [ ] 提供协程迁移机制
+    - [ ] 支持将协程从一个 executor 迁移到另一个 executor
+- [ ] 支持协程本地存储 (Coroutine Local Storage)
+    - [ ] 允许在协程中存储和访问局部数据
+- [ ] 提供协程优先级支持
+    - [ ] 允许为协程设置优先级，以影响调度顺序
+
+- [ ] 增强与现有异步库的互操作性
+    - [ ] 提供适配器，使得现有基于回调或 future 的异步库能够无缝集成到协程框架中
+
+- [ ] then-catch-finally 回调机制重构
+    - [ ] 重构现有的 then、catch、finally 回调链实现，使其更加高效和易用
+    - [ ] 提供更灵活的错误处理和资源清理机制
+    ```cpp
+    Task<> t() {
+        ...
+    }
+
+    async int main() {
+        co_await t().then([](pre_result){
+            ...
+        }).then([](pre_result){
+            ...
+        }).then([](pre_result){
+            ...
+        }).cathch([](exception){
+            ...
+        }).finally([](){
+            ...
+        });
+        return 0;
+    }
+
+    then
+
+    catch -> 1
+
+    finally -> 多个
+
+    finally
+    ```
