@@ -36,7 +36,7 @@ struct WhenAllState {
   std::vector<std::exception_ptr> exceptions;
   std::coroutine_handle<> continuation = nullptr;
   std::shared_ptr<AbstractScheduler> scheduler;
-  std::vector<Task<void>> wrappers;  // 存储包装任务以延长生命周期
+  // std::vector<Task<void>> wrappers;  // 移出 State 以避免循环引用
 
   bool all_completed() const { return remaining.load() == 0; }
 };
@@ -74,7 +74,9 @@ Task<std::tuple<details::task_result_type_t<Tasks>...>> when_all(
     throw std::runtime_error("No default scheduler available for when_all");
   }
   LOG_TRACE("when_all - got scheduler: ", (void*)state->scheduler.get());
-  state->wrappers.reserve(sizeof...(Tasks));
+
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(sizeof...(Tasks));
 
   // 为每个任务创建包装协程
   [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -142,13 +144,13 @@ Task<std::tuple<details::task_result_type_t<Tasks>...>> when_all(
             }
           };
 
-          state->wrappers.push_back(wrapper(state, std::move(task)));
+          wrappers.push_back(wrapper(state, std::move(task)));
         }.template operator()<Is>(std::forward<Tasks>(tasks)),
         ...);
   }(std::index_sequence_for<Tasks...>{});
 
   // 启动所有包装任务
-  for (auto& wrapper : state->wrappers) {
+  for (auto& wrapper : wrappers) {
     LOG_TRACE("when_all - starting wrapper task");
     wrapper.start();
   }

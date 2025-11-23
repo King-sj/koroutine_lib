@@ -7,21 +7,10 @@
 #include <variant>
 #include <vector>
 
+#include "details/fire_and_forget.hpp"
 #include "task.hpp"
 
 namespace koroutine {
-
-namespace details {
-struct FireAndForget {
-  struct promise_type {
-    FireAndForget get_return_object() { return {}; }
-    std::suspend_never initial_suspend() { return {}; }
-    std::suspend_never final_suspend() noexcept { return {}; }
-    void return_void() {}
-    void unhandled_exception() { std::terminate(); }
-  };
-};
-}  // namespace details
 
 /**
  * @brief 等待任意一个任务完成并返回结果及其索引
@@ -71,10 +60,7 @@ Task<std::pair<size_t, T>> when_any(std::vector<Task<T>> tasks) {
     auto wrapper = [](size_t i, auto state,
                       Task<T> task) -> details::FireAndForget {
       try {
-        // 手动构造 TaskAwaiter 并注入调度器
-        auto awaiter = TaskAwaiter<T>(std::move(task));
-        awaiter.install_scheduler(state->scheduler);
-        T result = co_await std::move(awaiter);
+        T result = co_await std::move(task);
 
         // 使用原子操作确保只有第一个完成的任务设置结果
         bool expected = false;
@@ -207,9 +193,7 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
     auto wrapper = [](size_t i, auto state,
                       Task<void> task) -> details::FireAndForget {
       try {
-        auto awaiter = TaskAwaiter<void>(std::move(task));
-        awaiter.install_scheduler(state->scheduler);
-        co_await std::move(awaiter);
+        co_await std::move(task);
 
         bool expected = false;
         if (state->completed.compare_exchange_strong(expected, true)) {
@@ -349,9 +333,7 @@ when_any(Tasks&&... tasks) {
           auto wrapper = [](auto state,
                             Task<T> task) -> details::FireAndForget {
             try {
-              auto awaiter = TaskAwaiter<T>(std::move(task));
-              awaiter.install_scheduler(state->scheduler);
-              T result = co_await std::move(awaiter);
+              T result = co_await std::move(task);
 
               bool expected = false;
               if (state->completed.compare_exchange_strong(expected, true)) {
