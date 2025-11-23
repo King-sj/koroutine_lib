@@ -179,7 +179,9 @@ TEST(WhenAllTest, ThreeTasks) {
 TEST(WhenAllTest, Vector) {
   std::vector<Task<int>> tasks;
   for (int i = 0; i < 5; ++i) {
-    tasks.push_back([i]() -> Task<int> { co_return i; }());
+    // 使用参数传递 i，确保 i 被复制到协程帧中
+    // 避免 lambda 捕获导致的悬垂引用问题（lambda 对象在协程执行前销毁）
+    tasks.push_back([](int val) -> Task<int> { co_return val; }(i));
   }
 
   auto combined = [&]() -> Task<std::vector<int>> {

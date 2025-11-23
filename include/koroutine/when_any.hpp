@@ -1,13 +1,27 @@
 #pragma once
 
 #include <atomic>
+#include <expected>
 #include <mutex>
 #include <optional>
+#include <variant>
 #include <vector>
 
 #include "task.hpp"
 
 namespace koroutine {
+
+namespace details {
+struct FireAndForget {
+  struct promise_type {
+    FireAndForget get_return_object() { return {}; }
+    std::suspend_never initial_suspend() { return {}; }
+    std::suspend_never final_suspend() noexcept { return {}; }
+    void return_void() {}
+    void unhandled_exception() { std::terminate(); }
+  };
+};
+}  // namespace details
 
 /**
  * @brief 等待任意一个任务完成并返回结果及其索引
@@ -48,14 +62,19 @@ Task<std::pair<size_t, T>> when_any(std::vector<Task<T>> tasks) {
   };
 
   auto state = std::make_shared<State>();
-  std::vector<Task<void>> wrappers;
-  wrappers.reserve(tasks.size());
+  // wrappers 不再需要存储，FireAndForget 会自动管理生命周期
+  // std::vector<Task<void>> wrappers;
+  // wrappers.reserve(tasks.size());
 
   // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    auto wrapper = [state, i](Task<T> task) -> Task<void> {
+    auto wrapper = [](size_t i, auto state,
+                      Task<T> task) -> details::FireAndForget {
       try {
-        T result = co_await std::move(task);
+        // 手动构造 TaskAwaiter 并注入调度器
+        auto awaiter = TaskAwaiter<T>(std::move(task));
+        awaiter.install_scheduler(state->scheduler);
+        T result = co_await std::move(awaiter);
 
         // 使用原子操作确保只有第一个完成的任务设置结果
         bool expected = false;
@@ -101,13 +120,14 @@ Task<std::pair<size_t, T>> when_any(std::vector<Task<T>> tasks) {
       }
     };
 
-    wrappers.push_back(wrapper(std::move(tasks[i])));
+    // 启动并分离任务
+    wrapper(i, state, std::move(tasks[i]));
   }
 
   // 启动所有包装任务
-  for (auto& wrapper : wrappers) {
-    wrapper.start();
-  }
+  // for (auto& wrapper : wrappers) {
+  //   wrapper.start();
+  // }
 
   // Awaiter
   struct WhenAnyAwaiter {
@@ -179,14 +199,17 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
   };
 
   auto state = std::make_shared<State>();
-  std::vector<Task<void>> wrappers;
-  wrappers.reserve(tasks.size());
+  // std::vector<Task<void>> wrappers;
+  // wrappers.reserve(tasks.size());
 
   // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    auto wrapper = [state, i](Task<void> task) -> Task<void> {
+    auto wrapper = [](size_t i, auto state,
+                      Task<void> task) -> details::FireAndForget {
       try {
-        co_await std::move(task);
+        auto awaiter = TaskAwaiter<void>(std::move(task));
+        awaiter.install_scheduler(state->scheduler);
+        co_await std::move(awaiter);
 
         bool expected = false;
         if (state->completed.compare_exchange_strong(expected, true)) {
@@ -223,13 +246,13 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
       }
     };
 
-    wrappers.push_back(wrapper(std::move(tasks[i])));
+    wrapper(i, state, std::move(tasks[i]));
   }
 
   // 启动所有包装任务
-  for (auto& wrapper : wrappers) {
-    wrapper.start();
-  }
+  // for (auto& wrapper : wrappers) {
+  //   wrapper.start();
+  // }
 
   struct WhenAnyVoidAwaiter {
     std::shared_ptr<State> state;
@@ -268,6 +291,138 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
   };
 
   co_return co_await WhenAnyVoidAwaiter{state};
+}
+
+namespace details {
+
+// when_any 的变参实现状态
+template <typename... ResultTypes>
+struct WhenAnyVariadicState {
+  std::atomic<bool> completed{false};
+  std::mutex mtx;
+  std::optional<std::variant<ResultTypes...>> result;
+  std::exception_ptr exception;
+  std::coroutine_handle<> continuation = nullptr;
+  std::shared_ptr<AbstractScheduler> scheduler;
+
+  WhenAnyVariadicState()
+      : scheduler(SchedulerManager::get_default_scheduler()) {}
+};
+
+}  // namespace details
+
+/**
+ * @brief 等待任意一个任务完成，返回 std::expected<std::variant<...>,
+ * std::exception_ptr>
+ *
+ * @tparam Tasks 任务类型参数包
+ * @param tasks 要等待的任务
+ * @return Task<std::expected<std::variant<ResultTypes...>, std::exception_ptr>>
+ *
+ * 使用示例:
+ * @code
+ * auto result = co_await when_any(task1(), task2());
+ * if (result) {
+ *   std::visit([](auto&& val) { std::cout << val; }, *result);
+ * } else {
+ *   // handle exception
+ * }
+ * @endcode
+ */
+template <typename... Tasks>
+  requires(details::TaskType<Tasks> && ...)
+Task<std::expected<std::variant<details::task_result_type_t<Tasks>...>,
+                   std::exception_ptr>>
+when_any(Tasks&&... tasks) {
+  using ResultVariant = std::variant<details::task_result_type_t<Tasks>...>;
+  using ReturnType = std::expected<ResultVariant, std::exception_ptr>;
+
+  auto state = std::make_shared<
+      details::WhenAnyVariadicState<details::task_result_type_t<Tasks>...>>();
+
+  // 启动包装任务
+  [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    (
+        [&]<std::size_t I, typename TaskType>(TaskType&& task) {
+          using T = details::task_result_type_t<TaskType>;
+
+          auto wrapper = [](auto state,
+                            Task<T> task) -> details::FireAndForget {
+            try {
+              auto awaiter = TaskAwaiter<T>(std::move(task));
+              awaiter.install_scheduler(state->scheduler);
+              T result = co_await std::move(awaiter);
+
+              bool expected = false;
+              if (state->completed.compare_exchange_strong(expected, true)) {
+                std::lock_guard lock(state->mtx);
+                // 将结果存入 variant 的对应索引位置
+                state->result.emplace(std::in_place_index<I>,
+                                      std::move(result));
+
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                           "when_any_var_cont")),
+                      0);
+                }
+              }
+            } catch (...) {
+              bool expected = false;
+              if (state->completed.compare_exchange_strong(expected, true)) {
+                std::lock_guard lock(state->mtx);
+                state->exception = std::current_exception();
+
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                           "when_any_var_cont")),
+                      0);
+                }
+              }
+            }
+          };
+
+          wrapper(state, std::move(task));
+        }.template operator()<Is>(std::forward<Tasks>(tasks)),
+        ...);
+  }(std::index_sequence_for<Tasks...>{});
+
+  struct Awaiter {
+    std::shared_ptr<
+        details::WhenAnyVariadicState<details::task_result_type_t<Tasks>...>>
+        state;
+
+    bool await_ready() const { return state->completed.load(); }
+
+    void await_suspend(std::coroutine_handle<> h) {
+      state->continuation = h;
+      if (state->completed.load() && state->scheduler) {
+        state->scheduler->schedule(
+            ScheduleRequest(h,
+                            ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                             "when_any_var_imm")),
+            0);
+      }
+    }
+
+    ReturnType await_resume() {
+      std::lock_guard lock(state->mtx);
+      if (state->exception) {
+        return std::unexpected(state->exception);
+      }
+      if (state->result) {
+        return std::move(*state->result);
+      }
+      throw std::runtime_error("when_any: no result available");
+    }
+  };
+
+  co_return co_await Awaiter{state};
 }
 
 }  // namespace koroutine
