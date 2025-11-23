@@ -34,3 +34,31 @@ endfunction()
 foreach(SRC IN LISTS UNIT_TEST_SOURCES)
     add_unit_test_from_file(${SRC})
 endforeach()
+
+# 集成测试
+file(GLOB_RECURSE INTEGRATION_TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/integration/*.cpp"
+)
+
+foreach(SRC IN LISTS INTEGRATION_TEST_SOURCES)
+    get_filename_component(TEST_NAME ${SRC} NAME_WE)
+    set(TGT "test_${TEST_NAME}")
+
+    add_executable(${TGT} ${SRC})
+
+    # 特殊处理 single_header 测试
+    if(TEST_NAME STREQUAL "test_single_header")
+        add_dependencies(${TGT} koroutine_single_header)
+        target_include_directories(${TGT} PRIVATE ${CMAKE_BINARY_DIR}/include)
+    endif()
+
+    target_link_libraries(${TGT}
+        PRIVATE
+        koroutinelib_static
+        GTest::gtest_main
+    )
+
+    add_test(NAME ${TGT} COMMAND ${TGT})
+    gtest_discover_tests(${TGT})
+endforeach()
+
