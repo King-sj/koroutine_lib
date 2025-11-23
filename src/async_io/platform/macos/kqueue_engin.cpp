@@ -1,8 +1,12 @@
 #if defined(__APPLE__)
 #include "koroutine/async_io/platform/macos/kqueue_engin.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <sys/event.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <system_error>
@@ -55,9 +59,11 @@ void KqueueIOEngine::run() {
 
         switch (op->type) {
           case OpType::READ:
+          case OpType::ACCEPT:
             process_read(op);
             break;
           case OpType::WRITE:
+          case OpType::CONNECT:
             process_write(op);
             break;
           case OpType::CLOSE:
@@ -124,6 +130,31 @@ void KqueueIOEngine::run() {
             op->actual_size = 0;
           } else {
             op->actual_size = static_cast<size_t>(n);
+          }
+        } else if (op->type == OpType::ACCEPT) {
+          socklen_t addrlen = static_cast<socklen_t>(op->size);
+          int client_fd =
+              ::accept(static_cast<int>(fd),
+                       static_cast<struct sockaddr*>(op->buffer), &addrlen);
+          if (client_fd < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+            op->actual_size = 0;
+          } else {
+            // Set non-blocking for the new socket
+            int flags = ::fcntl(client_fd, F_GETFL, 0);
+            ::fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+            op->actual_size = static_cast<size_t>(client_fd);
+          }
+        } else if (op->type == OpType::CONNECT) {
+          int error = 0;
+          socklen_t len = sizeof(error);
+          if (::getsockopt(static_cast<int>(fd), SOL_SOCKET, SO_ERROR, &error,
+                           &len) < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+          } else if (error != 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(error));
+          } else {
+            op->actual_size = 0;
           }
         }
       }

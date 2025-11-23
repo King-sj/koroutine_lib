@@ -25,11 +25,11 @@ inline Task<std::shared_ptr<AsyncIOObject>> async_open(
 }
 
 // 网络连接(工厂函数)
-inline Task<std::unique_ptr<AsyncSocket>> async_connect(const std::string& host,
+inline Task<std::shared_ptr<AsyncSocket>> async_connect(const std::string& host,
                                                         uint16_t port) {
   auto engine = get_default_io_engine();
   auto socket = co_await AsyncSocket::connect(engine, host, port);
-  co_return std::move(socket);
+  co_return socket;
 }
 
 // 创建Mock异步IO对象(工厂函数)

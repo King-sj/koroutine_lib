@@ -25,9 +25,9 @@ function(add_unit_test_from_file SRC)
         GTest::gtest_main
     )
 
-    # 将可执行文件注册为 CTest 测试，并启用 gtest 的 test discovery
-    add_test(NAME ${TGT} COMMAND ${TGT})
-    gtest_discover_tests(${TGT})
+    # 使用 gtest 的自动发现并将子测试按可执行文件分组
+    # 每个子测试会以 "${TGT}/<TestName>" 的形式注册到 CTest，避免重复的顶级 add_test
+    gtest_discover_tests(${TGT} TEST_PREFIX "${TGT}/")
 endfunction()
 
 # 为每个找到的测试源文件调用上面的函数
@@ -58,7 +58,7 @@ foreach(SRC IN LISTS INTEGRATION_TEST_SOURCES)
         GTest::gtest_main
     )
 
-    add_test(NAME ${TGT} COMMAND ${TGT})
-    gtest_discover_tests(${TGT})
+    # 使用 gtest 的自动发现并将子测试按可执行文件分组
+    gtest_discover_tests(${TGT} TEST_PREFIX "${TGT}/")
 endforeach()
 
