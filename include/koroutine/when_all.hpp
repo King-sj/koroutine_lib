@@ -7,11 +7,12 @@
 #include <utility>
 #include <vector>
 
+#include "details/constraint.hpp"
 #include "task.hpp"
 
 namespace koroutine {
 
-namespace detail {
+namespace details {
 
 // Helper: 获取 Task 的 ResultType
 template <typename T>
@@ -40,7 +41,7 @@ struct WhenAllState {
   bool all_completed() const { return remaining.load() == 0; }
 };
 
-}  // namespace detail
+}  // namespace details
 
 /**
  * @brief 等待所有任务完成并返回所有结果的 tuple
@@ -55,15 +56,16 @@ struct WhenAllState {
  * @endcode
  */
 template <typename... Tasks>
-Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
+  requires(details::TaskType<Tasks> && ...)
+Task<std::tuple<details::task_result_type_t<Tasks>...>> when_all(
     Tasks&&... tasks) {
-  using ResultTuple = std::tuple<detail::task_result_type_t<Tasks>...>;
+  using ResultTuple = std::tuple<details::task_result_type_t<Tasks>...>;
 
   LOG_TRACE("when_all - starting with ", sizeof...(Tasks), " tasks");
 
   // 创建共享状态
   auto state = std::make_shared<
-      detail::WhenAllState<detail::task_result_type_t<Tasks>...>>();
+      details::WhenAllState<details::task_result_type_t<Tasks>...>>();
 
   // 获取调度器
   state->scheduler = SchedulerManager::get_default_scheduler();
@@ -156,7 +158,8 @@ Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
                                                                   // awaiter
                                                                   // 等待所有任务完成
   struct WhenAllAwaiter {
-    std::shared_ptr<detail::WhenAllState<detail::task_result_type_t<Tasks>...>>
+    std::shared_ptr<
+        details::WhenAllState<details::task_result_type_t<Tasks>...>>
         state;
 
     bool await_ready() const { return state->all_completed(); }
@@ -250,10 +253,10 @@ Task<std::vector<T>> when_all(std::vector<Task<T>> tasks) {
 
   // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    auto wrapper = [state, i](Task<T> task) -> Task<void> {
+    auto wrapper = [](size_t i, auto state, Task<T> task) -> Task<void> {
       try {
         T result = co_await std::move(task);
-        LOG_TRACE("when_all(vector) - task ", i, " completed");
+        LOG_TRACE("when_all(vector) - task ", i, " completed : ", result);
         std::lock_guard lock(state->mtx);
         state->results[i] = std::move(result);
 
@@ -283,7 +286,7 @@ Task<std::vector<T>> when_all(std::vector<Task<T>> tasks) {
       }
     };
 
-    wrappers.push_back(wrapper(std::move(tasks[i])));
+    wrappers.push_back(wrapper(i, state, std::move(tasks[i])));
   }
 
   // 启动所有包装任务

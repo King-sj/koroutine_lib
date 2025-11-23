@@ -1,3 +1,10 @@
+# 注意点
+
+## 不要捕获局部变量的引用到协程中
+
+在使用 lambda 创建协程任务时，避免捕获局部变量的引用。因为 lambda 对象可能在协程执行前就被销毁，导致悬垂引用问题。建议通过参数传递变量值，确保变量在协程帧中有效。
+
+```cpp
 #define KOROUTINE_DEBUG
 #include <vector>
 
@@ -28,3 +35,5 @@ int main() {
   Runtime::block_on(async_main());
   return 0;
 }
+
+```

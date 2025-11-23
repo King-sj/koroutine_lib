@@ -234,6 +234,7 @@ struct TaskPromiseBase {
 // 通用模板 - 非 void 类型
 template <typename ResultType>
 struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
+  using result_type = ResultType;
   using Base = TaskPromiseBase<ResultType, TaskPromise<ResultType>>;
   using Base::completion;
   using Base::completion_lock;
@@ -256,6 +257,7 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
 // void 类型的特化
 template <>
 struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
+  using result_type = void;
   using Base = TaskPromiseBase<void, TaskPromise<void>>;
 
   // CRTP 实现

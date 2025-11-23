@@ -86,7 +86,7 @@ class AwaiterBase : public AwaiterBaseCRTP<R, AwaiterBase<R>> {
     LOG_INFO("AwaiterBase::move constructor - moved AwaiterBase");
   }
 
-  R await_resume() {
+  virtual R await_resume() {
     LOG_TRACE("AwaiterBase::await_resume - preparing to resume");
     before_resume();
     LOG_TRACE("AwaiterBase::await_resume - returning result");
@@ -132,7 +132,7 @@ class AwaiterBase<void> : public AwaiterBaseCRTP<void, AwaiterBase<void>> {
   // move constructor
   AwaiterBase(AwaiterBase&& awaiter) noexcept : Base(std::move(awaiter)) {}
 
-  void await_resume() {
+  virtual void await_resume() {
     LOG_TRACE("AwaiterBase<void>::await_resume - preparing to resume");
     before_resume();
     LOG_TRACE("AwaiterBase<void>::await_resume - returning result : void");
