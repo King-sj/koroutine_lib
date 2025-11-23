@@ -14,6 +14,7 @@
 #include <string>
 #include <system_error>
 
+#include "koroutine/async_io/engin.h"
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
 #include "koroutine/debug.h"
@@ -73,6 +74,11 @@ inline int translate_mode(std::ios::openmode mode) {
 class AsyncFile : public AsyncIOObject,
                   public std::enable_shared_from_this<AsyncFile> {
  public:
+  static Task<std::shared_ptr<AsyncFile>> open(const std::string& path,
+                                               std::ios::openmode mode) {
+    return open(get_default_io_engine(), path, mode);
+  }
+
   static Task<std::shared_ptr<AsyncFile>> open(std::shared_ptr<IOEngine> engine,
                                                const std::string& path,
                                                std::ios::openmode mode) {

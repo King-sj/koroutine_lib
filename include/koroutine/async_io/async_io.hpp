@@ -16,17 +16,6 @@
 
 namespace koroutine::async_io {
 
-// 获取默认的 IO 引擎 (单例)
-inline std::shared_ptr<IOEngine> get_default_io_engine() {
-  static auto engine = [] {
-    auto eng = IOEngine::create();
-    // 在后台线程运行默认引擎
-    std::thread([eng] { eng->run(); }).detach();
-    return eng;
-  }();
-  return engine;
-}
-
 // 打开文件(工厂函数)
 inline Task<std::shared_ptr<AsyncIOObject>> async_open(
     const std::string& path, std::ios::openmode mode) {

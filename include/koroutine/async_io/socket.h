@@ -17,6 +17,7 @@
 #include <string>
 #include <system_error>
 
+#include "koroutine/async_io/engin.h"
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
 #include "koroutine/task.hpp"
@@ -26,6 +27,11 @@ namespace koroutine::async_io {
 class AsyncSocket : public AsyncIOObject,
                     public std::enable_shared_from_this<AsyncSocket> {
  public:
+  static Task<std::unique_ptr<AsyncSocket>> connect(const std::string& host,
+                                                    uint16_t port) {
+    return connect(get_default_io_engine(), host, port);
+  }
+
   static Task<std::unique_ptr<AsyncSocket>> connect(
       std::shared_ptr<IOEngine> engine, const std::string& host,
       uint16_t port) {

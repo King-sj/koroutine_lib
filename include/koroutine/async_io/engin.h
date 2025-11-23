@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <thread>
 
 #include "koroutine/async_io/op.h"
 
@@ -21,4 +22,16 @@ class IOEngine {
   // 完成IO操作后唤醒协程
   void complete(std::shared_ptr<AsyncIOOp> op) { op->complete(); }
 };
+
+// 获取默认的 IO 引擎 (单例)
+inline std::shared_ptr<IOEngine> get_default_io_engine() {
+  static auto engine = [] {
+    auto eng = IOEngine::create();
+    // 在后台线程运行默认引擎
+    std::thread([eng] { eng->run(); }).detach();
+    return eng;
+  }();
+  return engine;
+}
+
 }  // namespace koroutine::async_io

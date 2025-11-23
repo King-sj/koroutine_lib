@@ -18,10 +18,8 @@ Task<void> creat_write_file(const std::string& path,
   LOG_DEBUG("Waiting to write file: ", path);
   co_await io_mutex.lock();
   LOG_DEBUG("Creating and writing to file: ", path);
-  std::shared_ptr<IOEngine> engine = get_default_io_engine();
-  LOG_DEBUG("IOEngine created");
-  auto file =
-      co_await AsyncFile::open(engine, path, std::ios::out | std::ios::trunc);
+
+  auto file = co_await AsyncFile::open(path, std::ios::out | std::ios::trunc);
   LOG_DEBUG("File opened: ", path, " file ptr=", (void*)file.get());
   if (!file) {
     LOG_ERROR("File is null after open!");
@@ -54,9 +52,8 @@ Task<void> read_file(const std::string& path) {
     co_await completed.wait(io_mutex);
   }
   LOG_DEBUG("Reading file: ", path);
-  std::shared_ptr<IOEngine> engine = get_default_io_engine();
-  LOG_DEBUG("IOEngine created");
-  auto file = co_await AsyncFile::open(engine, path, std::ios::in);
+
+  auto file = co_await AsyncFile::open(path, std::ios::in);
   LOG_DEBUG("File opened: ", path);
   char buffer[1024];
   LOG_DEBUG("Reading content from file: ", path);
