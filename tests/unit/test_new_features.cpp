@@ -81,15 +81,16 @@ TEST(SchedulerTest, ScheduleWithDelay) {
 
 TEST(SchedulerTest, CoAwaitSchedule) {
   auto scheduler = std::make_shared<SimpleScheduler>();
-  auto start_time = std::chrono::steady_clock::now();
-
+  std::chrono::milliseconds elapsed{0};
   auto task = [&]() -> Task<int> {
+    auto start_time = std::chrono::steady_clock::now();
     co_await scheduler->schedule(100);  // 延迟100ms
+    elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time);
     co_return 42;
   };
 
   int result = Runtime::block_on(task());
-  auto elapsed = std::chrono::steady_clock::now() - start_time;
 
   EXPECT_EQ(result, 42);
   EXPECT_GE(elapsed, 100ms);

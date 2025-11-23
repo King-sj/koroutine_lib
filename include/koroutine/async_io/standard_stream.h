@@ -12,6 +12,7 @@
 
 #include <cctype>
 #include <concepts>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -20,6 +21,8 @@
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/async_io/op.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
+#include "koroutine/channel.hpp"
+#include "koroutine/task.hpp"
 
 namespace koroutine::async_io {
 
@@ -38,6 +41,12 @@ class AsyncStandardStream
 #endif
   }
 
+  ~AsyncStandardStream() {
+    if (output_channel_) {
+      output_channel_->close();
+    }
+  }
+
   Task<size_t> read(void* buf, size_t size) override {
     auto io_op = std::make_shared<AsyncIOOp>(OpType::READ, shared_from_this(),
                                              buf, size);
@@ -45,6 +54,22 @@ class AsyncStandardStream
   }
 
   Task<size_t> write(const void* buf, size_t size) override {
+    if (fd_ == 1 || fd_ == 2) {
+      if (!output_channel_) {
+        std::lock_guard<std::mutex> lock(init_mutex_);
+        if (!output_channel_) {
+          output_channel_ = std::make_shared<Channel<std::string>>(1024);
+          printer_task_ = std::make_shared<Task<void>>(run_printer(
+              std::weak_ptr<AsyncStandardStream>(shared_from_this()),
+              output_channel_));
+          printer_task_->start();
+        }
+      }
+      std::string data((const char*)buf, size);
+      co_await output_channel_->write(std::move(data));
+      co_return size;
+    }
+
     auto io_op = std::make_shared<AsyncIOOp>(OpType::WRITE, shared_from_this(),
                                              const_cast<void*>(buf), size);
     co_return co_await IOAwaiter<size_t>{io_op};
@@ -52,13 +77,36 @@ class AsyncStandardStream
 
   Task<void> close() override {
     // 标准流不关闭底层 fd
+    if (output_channel_) {
+      output_channel_->close();
+    }
     co_return;
   }
 
   intptr_t native_handle() const override { return fd_; }
 
  private:
+  static Task<void> run_printer(std::weak_ptr<AsyncStandardStream> weak_self,
+                                std::shared_ptr<Channel<std::string>> channel) {
+    try {
+      while (true) {
+        std::string data = co_await channel->read();
+        auto self = weak_self.lock();
+        if (!self) break;
+
+        auto io_op = std::make_shared<AsyncIOOp>(
+            OpType::WRITE, self, (void*)data.data(), data.size());
+        co_await IOAwaiter<size_t>{io_op};
+      }
+    } catch (...) {
+      // Channel closed
+    }
+  }
+
   int fd_;
+  std::shared_ptr<Channel<std::string>> output_channel_;
+  std::shared_ptr<Task<void>> printer_task_;
+  std::mutex init_mutex_;
 };
 
 class StandardStream {
