@@ -118,6 +118,8 @@ static void join_all(Tasks&&... tasks) {
   std::condition_variable cv;
   std::atomic<size_t> remaining{sizeof...(Tasks)};
   std::vector<std::exception_ptr> exceptions;
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(sizeof...(Tasks));
 
   // 为每个任务创建包装协程
   auto wrap_task = [&]<typename TaskType>(TaskType&& task) -> Task<void> {
@@ -140,8 +142,13 @@ static void join_all(Tasks&&... tasks) {
     }
   };
 
+  // 创建所有包装任务并存储
+  (wrappers.push_back(wrap_task(std::forward<Tasks>(tasks))), ...);
+
   // 启动所有包装任务
-  (wrap_task(std::forward<Tasks>(tasks)).start(), ...);
+  for (auto& wrapper : wrappers) {
+    wrapper.start();
+  }
 
   // 等待所有任务完成
   std::unique_lock lk(mtx);

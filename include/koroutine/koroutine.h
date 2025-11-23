@@ -6,3 +6,5 @@
 #include "schedulers/scheduler.h"
 #include "task.hpp"
 #include "user_tools.h"
+#include "when_all.hpp"
+#include "when_any.hpp"

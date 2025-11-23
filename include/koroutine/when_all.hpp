@@ -35,6 +35,7 @@ struct WhenAllState {
   std::vector<std::exception_ptr> exceptions;
   std::coroutine_handle<> continuation = nullptr;
   std::shared_ptr<AbstractScheduler> scheduler;
+  std::vector<Task<void>> wrappers;  // 存储包装任务以延长生命周期
 
   bool all_completed() const { return remaining.load() == 0; }
 };
@@ -66,44 +67,71 @@ Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
 
   // 获取调度器
   state->scheduler = SchedulerManager::get_default_scheduler();
+  if (!state->scheduler) {
+    LOG_ERROR("when_all - no default scheduler available!");
+    throw std::runtime_error("No default scheduler available for when_all");
+  }
+  LOG_TRACE("when_all - got scheduler: ", (void*)state->scheduler.get());
+  state->wrappers.reserve(sizeof...(Tasks));
 
   // 为每个任务创建包装协程
   [&]<std::size_t... Is>(std::index_sequence<Is...>) {
     (
         [&]<std::size_t I, typename T>(Task<T>&& task) {
-          auto wrapper = [state](Task<T> t) -> Task<void> {
+          LOG_TRACE("Creating wrapper for index: ", I);
+          auto wrapper = [](auto s, Task<T> t) -> Task<void> {
+            LOG_TRACE("wrapper for index ", I, " starting");
             try {
+              LOG_TRACE("wrapper for index ", I, " awaiting task");
               T result = co_await std::move(t);
-              LOG_TRACE("when_all - task ", I, " completed successfully");
-              std::lock_guard lock(state->mtx);
-              std::get<I>(state->results) = std::move(result);
+              LOG_TRACE("wrapper for index ", I,
+                        " task completed successfully with result");
+              {
+                std::lock_guard lock(s->mtx);
+                LOG_TRACE("wrapper for index ", I, " storing result at index ",
+                          I);
+                std::get<I>(s->results) = std::move(result);
+              }
+              auto remaining = s->remaining.fetch_sub(1);
+              LOG_TRACE("wrapper for index ", I,
+                        " remaining before decrement: ", remaining);
 
-              if (state->remaining.fetch_sub(1) == 1) {
+              if (remaining == 1) {
                 // 最后一个任务完成
-                state->cv.notify_one();
+                LOG_TRACE("wrapper for index ", I,
+                          " LAST TASK, notifying and resuming continuation");
+                s->cv.notify_one();
 
                 // 恢复 continuation
-                if (state->continuation && state->scheduler) {
-                  state->scheduler->schedule(
+                if (s->continuation && s->scheduler) {
+                  LOG_TRACE("wrapper for index ", I,
+                            " scheduling continuation, handle=",
+                            s->continuation.address());
+                  s->scheduler->schedule(
                       ScheduleRequest(
-                          state->continuation,
+                          s->continuation,
                           ScheduleMetadata(ScheduleMetadata::Priority::Normal,
                                            "when_all_continuation")),
                       0);
+                } else {
+                  LOG_ERROR("wrapper for index ", I,
+                            " continuation or scheduler is null! continuation=",
+                            s->continuation.address(),
+                            " scheduler=", (void*)s->scheduler.get());
                 }
               }
             } catch (...) {
               LOG_TRACE("when_all - task ", I, " failed with exception");
-              std::lock_guard lock(state->mtx);
-              state->exceptions.push_back(std::current_exception());
+              std::lock_guard lock(s->mtx);
+              s->exceptions.push_back(std::current_exception());
 
-              if (state->remaining.fetch_sub(1) == 1) {
-                state->cv.notify_one();
+              if (s->remaining.fetch_sub(1) == 1) {
+                s->cv.notify_one();
 
-                if (state->continuation && state->scheduler) {
-                  state->scheduler->schedule(
+                if (s->continuation && s->scheduler) {
+                  s->scheduler->schedule(
                       ScheduleRequest(
-                          state->continuation,
+                          s->continuation,
                           ScheduleMetadata(ScheduleMetadata::Priority::Normal,
                                            "when_all_continuation")),
                       0);
@@ -112,10 +140,21 @@ Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
             }
           };
 
-          wrapper(std::move(task)).start();
+          state->wrappers.push_back(wrapper(state, std::move(task)));
         }.template operator()<Is>(std::forward<Tasks>(tasks)),
         ...);
-  }(std::index_sequence_for<Tasks...>{});  // 创建 awaiter 等待所有任务完成
+  }(std::index_sequence_for<Tasks...>{});
+
+  // 启动所有包装任务
+  for (auto& wrapper : state->wrappers) {
+    LOG_TRACE("when_all - starting wrapper task");
+    wrapper.start();
+  }
+
+  LOG_TRACE(
+      "when_all - all wrapper tasks started, creating awaiter");  // 创建
+                                                                  // awaiter
+                                                                  // 等待所有任务完成
   struct WhenAllAwaiter {
     std::shared_ptr<detail::WhenAllState<detail::task_result_type_t<Tasks>...>>
         state;
@@ -125,16 +164,27 @@ Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
     void await_suspend(std::coroutine_handle<> handle) {
       LOG_TRACE(
           "WhenAllAwaiter::await_suspend - suspending until all tasks "
-          "complete");
+          "complete, handle=",
+          handle.address());
       state->continuation = handle;
+      LOG_TRACE(
+          "WhenAllAwaiter::await_suspend - continuation set, checking if "
+          "already completed");
 
       // 如果在设置 continuation 之前所有任务已经完成，立即恢复
       if (state->all_completed() && state->scheduler) {
+        LOG_TRACE(
+            "WhenAllAwaiter::await_suspend - tasks already completed, "
+            "scheduling immediate resume");
         state->scheduler->schedule(
             ScheduleRequest(handle,
                             ScheduleMetadata(ScheduleMetadata::Priority::Normal,
                                              "when_all_immediate")),
             0);
+      } else {
+        LOG_TRACE(
+            "WhenAllAwaiter::await_suspend - tasks not yet completed, "
+            "waiting...");
       }
     }
 
