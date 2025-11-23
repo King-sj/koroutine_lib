@@ -61,21 +61,29 @@ static ResultType block_on(Task<ResultType>&& task) {
   std::condition_variable cv;
   std::atomic<bool> is_completed = false;
 
-  task.then([&](ResultType res) {
-        LOG_TRACE("Runtime::block_on - task completed successfully");
-        std::lock_guard lock(mtx);
-        result = std::move(res);
-        is_completed = true;
-        cv.notify_one();
-      })
-      .catching([&](std::exception& e) {
-        LOG_TRACE("Runtime::block_on - task completed with exception");
-        std::lock_guard lock(mtx);
-        exception_ptr = std::make_exception_ptr(e);
-        is_completed = true;
-        cv.notify_one();
-      });
-  task.start();
+  // 创建包装任务来捕获结果和异常
+  auto wrapper = [](Task<ResultType> t, auto& result, auto& exception_ptr,
+                    auto& mtx, auto& cv, auto& is_completed) -> Task<void> {
+    try {
+      ResultType res = co_await std::move(t);
+      LOG_TRACE("Runtime::block_on - task completed successfully");
+      std::lock_guard lock(mtx);
+      result = std::move(res);
+      is_completed = true;
+      cv.notify_one();
+    } catch (...) {
+      LOG_TRACE("Runtime::block_on - task completed with exception");
+      std::lock_guard lock(mtx);
+      exception_ptr = std::current_exception();
+      is_completed = true;
+      cv.notify_one();
+    }
+  };
+
+  auto wrapper_task =
+      wrapper(std::move(task), result, exception_ptr, mtx, cv, is_completed);
+  wrapper_task.start();
+
   LOG_TRACE("Runtime::block_on - waiting for task to complete");
   std::unique_lock lock(mtx);
   cv.wait(lock, [&is_completed]() { return is_completed.load(); });
@@ -92,11 +100,10 @@ static void block_on(Task<void>&& task) {
   // wrap a Task<int> around Task<void>
   // FIXME: Don't capture the task directly in lambda - it will be destroyed
   // before being moved to coroutine frame. Instead, create a helper coroutine.
-  auto wrapper = [](Task<void> t) -> Task<int> {
-    co_await std::move(t);
+  auto wrapper_task = [](Task<void>&& task) -> Task<int> {
+    co_await std::move(task);
     co_return 0;
-  };
-  auto wrapper_task = wrapper(std::move(task));
+  }(std::move(task));
   block_on(std::move(wrapper_task));
 }
 
@@ -107,43 +114,36 @@ static void block_on(Task<void>&& task) {
  */
 template <typename... Tasks>
 static void join_all(Tasks&&... tasks) {
-  // Attach completion callbacks first, then start all tasks concurrently,
-  // and wait for all to finish. We collect the first exception (if any)
-  // and rethrow it after all tasks complete.
   std::mutex mtx;
   std::condition_variable cv;
   std::atomic<size_t> remaining{sizeof...(Tasks)};
   std::vector<std::exception_ptr> exceptions;
 
-  // Helper to attach callbacks for non-void and void Task types
-  auto attach_wait = [&](auto& task) {
-    using T = std::decay_t<decltype(task)>;
-
-    // catching is common for all Task types
-    task.catching([&](std::exception& e) {
+  // 为每个任务创建包装协程
+  auto wrap_task = [&]<typename TaskType>(TaskType&& task) -> Task<void> {
+    try {
+      if constexpr (std::is_same_v<std::decay_t<TaskType>, Task<void>>) {
+        co_await std::forward<TaskType>(task);
+      } else {
+        // 丢弃非 void 任务的结果
+        (void)co_await std::forward<TaskType>(task);
+      }
+      if (remaining.fetch_sub(1) == 1) {
+        cv.notify_one();
+      }
+    } catch (...) {
       std::lock_guard lk(mtx);
-      exceptions.push_back(std::make_exception_ptr(e));
-      if (remaining.fetch_sub(1) == 1) cv.notify_one();
-    });
-
-    if constexpr (std::is_same_v<T, Task<void>>) {
-      task.then([&]() {
-        if (remaining.fetch_sub(1) == 1) cv.notify_one();
-      });
-    } else {
-      task.then([&](auto) {
-        if (remaining.fetch_sub(1) == 1) cv.notify_one();
-      });
+      exceptions.push_back(std::current_exception());
+      if (remaining.fetch_sub(1) == 1) {
+        cv.notify_one();
+      }
     }
   };
 
-  // Attach callbacks to each task (evaluate left-to-right)
-  (attach_wait(tasks), ...);
+  // 启动所有包装任务
+  (wrap_task(std::forward<Tasks>(tasks)).start(), ...);
 
-  // Start all tasks concurrently
-  (tasks.start(), ...);
-
-  // Wait until all tasks have completed
+  // 等待所有任务完成
   std::unique_lock lk(mtx);
   cv.wait(lk, [&remaining]() { return remaining.load() == 0; });
 
@@ -172,31 +172,39 @@ static void join_all(std::vector<TaskType> tasks) {
   std::condition_variable cv;
   std::atomic<size_t> remaining{tasks.size()};
   std::vector<std::exception_ptr> exceptions;
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(tasks.size());
 
-  // Attach callbacks to each task
+  // 为每个任务创建包装协程
   for (auto& task : tasks) {
-    task.catching([&](std::exception& e) {
-      std::lock_guard lk(mtx);
-      exceptions.push_back(std::make_exception_ptr(e));
-      if (remaining.fetch_sub(1) == 1) cv.notify_one();
-    });
-
-    using T = std::decay_t<decltype(task)>;
-    if constexpr (std::is_same_v<T, Task<void>>) {
-      task.then([&]() {
-        if (remaining.fetch_sub(1) == 1) cv.notify_one();
-      });
-    } else {
-      task.then([&](auto) {
-        if (remaining.fetch_sub(1) == 1) cv.notify_one();
-      });
-    }
+    auto wrapper = [&mtx, &cv, &remaining,
+                    &exceptions]<typename T>(T&& t) -> Task<void> {
+      try {
+        if constexpr (std::is_same_v<std::decay_t<T>, Task<void>>) {
+          co_await std::forward<T>(t);
+        } else {
+          (void)co_await std::forward<T>(t);
+        }
+        if (remaining.fetch_sub(1) == 1) {
+          cv.notify_one();
+        }
+      } catch (...) {
+        std::lock_guard lk(mtx);
+        exceptions.push_back(std::current_exception());
+        if (remaining.fetch_sub(1) == 1) {
+          cv.notify_one();
+        }
+      }
+    };
+    wrappers.push_back(wrapper(std::move(task)));
   }
 
-  // Start all tasks
-  for (auto& task : tasks) task.start();
+  // 启动所有包装任务
+  for (auto& wrapper : wrappers) {
+    wrapper.start();
+  }
 
-  // Wait for completion
+  // 等待完成
   std::unique_lock lk(mtx);
   cv.wait(lk, [&remaining]() { return remaining.load() == 0; });
 

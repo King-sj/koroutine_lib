@@ -67,56 +67,55 @@ Task<std::tuple<detail::task_result_type_t<Tasks>...>> when_all(
   // 获取调度器
   state->scheduler = SchedulerManager::get_default_scheduler();
 
-  // 为每个任务附加完成回调
-  // 使用索引序列来展开参数包
+  // 为每个任务创建包装协程
   [&]<std::size_t... Is>(std::index_sequence<Is...>) {
     (
         [&]<std::size_t I, typename T>(Task<T>&& task) {
-          task.then([state](T result) {
-                LOG_TRACE("when_all - task ", I, " completed successfully");
-                std::lock_guard lock(state->mtx);
-                std::get<I>(state->results) = std::move(result);
+          auto wrapper = [state](Task<T> t) -> Task<void> {
+            try {
+              T result = co_await std::move(t);
+              LOG_TRACE("when_all - task ", I, " completed successfully");
+              std::lock_guard lock(state->mtx);
+              std::get<I>(state->results) = std::move(result);
 
-                if (state->remaining.fetch_sub(1) == 1) {
-                  // 最后一个任务完成
-                  state->cv.notify_one();
+              if (state->remaining.fetch_sub(1) == 1) {
+                // 最后一个任务完成
+                state->cv.notify_one();
 
-                  // 恢复 continuation
-                  if (state->continuation && state->scheduler) {
-                    state->scheduler->schedule(
-                        ScheduleRequest(
-                            state->continuation,
-                            ScheduleMetadata(ScheduleMetadata::Priority::Normal,
-                                             "when_all_continuation")),
-                        0);
-                  }
+                // 恢复 continuation
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::Normal,
+                                           "when_all_continuation")),
+                      0);
                 }
-              })
-              .catching([state](std::exception& e) {
-                LOG_TRACE("when_all - task ", I, " failed with exception");
-                std::lock_guard lock(state->mtx);
-                state->exceptions.push_back(std::make_exception_ptr(e));
+              }
+            } catch (...) {
+              LOG_TRACE("when_all - task ", I, " failed with exception");
+              std::lock_guard lock(state->mtx);
+              state->exceptions.push_back(std::current_exception());
 
-                if (state->remaining.fetch_sub(1) == 1) {
-                  state->cv.notify_one();
+              if (state->remaining.fetch_sub(1) == 1) {
+                state->cv.notify_one();
 
-                  if (state->continuation && state->scheduler) {
-                    state->scheduler->schedule(
-                        ScheduleRequest(
-                            state->continuation,
-                            ScheduleMetadata(ScheduleMetadata::Priority::Normal,
-                                             "when_all_continuation")),
-                        0);
-                  }
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::Normal,
+                                           "when_all_continuation")),
+                      0);
                 }
-              });
+              }
+            }
+          };
 
-          task.start();
+          wrapper(std::move(task)).start();
         }.template operator()<Is>(std::forward<Tasks>(tasks)),
         ...);
-  }(std::index_sequence_for<Tasks...>{});
-
-  // 创建 awaiter 等待所有任务完成
+  }(std::index_sequence_for<Tasks...>{});  // 创建 awaiter 等待所有任务完成
   struct WhenAllAwaiter {
     std::shared_ptr<detail::WhenAllState<detail::task_result_type_t<Tasks>...>>
         state;
@@ -196,41 +195,50 @@ Task<std::vector<T>> when_all(std::vector<Task<T>> tasks) {
   };
 
   auto state = std::make_shared<State>(tasks.size());
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(tasks.size());
 
-  // 为每个任务附加回调
+  // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    tasks[i]
-        .then([state, i](T result) {
-          LOG_TRACE("when_all(vector) - task ", i, " completed");
-          std::lock_guard lock(state->mtx);
-          state->results[i] = std::move(result);
+    auto wrapper = [state, i](Task<T> task) -> Task<void> {
+      try {
+        T result = co_await std::move(task);
+        LOG_TRACE("when_all(vector) - task ", i, " completed");
+        std::lock_guard lock(state->mtx);
+        state->results[i] = std::move(result);
 
-          if (state->remaining.fetch_sub(1) == 1 && state->continuation &&
-              state->scheduler) {
-            state->scheduler->schedule(
-                ScheduleRequest(
-                    state->continuation,
-                    ScheduleMetadata(ScheduleMetadata::Priority::Normal,
-                                     "when_all_vec_continuation")),
-                0);
-          }
-        })
-        .catching([state, i](std::exception& e) {
-          LOG_TRACE("when_all(vector) - task ", i, " failed");
-          std::lock_guard lock(state->mtx);
-          state->exceptions.push_back(std::make_exception_ptr(e));
+        if (state->remaining.fetch_sub(1) == 1 && state->continuation &&
+            state->scheduler) {
+          state->scheduler->schedule(
+              ScheduleRequest(
+                  state->continuation,
+                  ScheduleMetadata(ScheduleMetadata::Priority::Normal,
+                                   "when_all_vec_continuation")),
+              0);
+        }
+      } catch (...) {
+        LOG_TRACE("when_all(vector) - task ", i, " failed");
+        std::lock_guard lock(state->mtx);
+        state->exceptions.push_back(std::current_exception());
 
-          if (state->remaining.fetch_sub(1) == 1 && state->continuation &&
-              state->scheduler) {
-            state->scheduler->schedule(
-                ScheduleRequest(
-                    state->continuation,
-                    ScheduleMetadata(ScheduleMetadata::Priority::Normal,
-                                     "when_all_vec_continuation")),
-                0);
-          }
-        })
-        .start();
+        if (state->remaining.fetch_sub(1) == 1 && state->continuation &&
+            state->scheduler) {
+          state->scheduler->schedule(
+              ScheduleRequest(
+                  state->continuation,
+                  ScheduleMetadata(ScheduleMetadata::Priority::Normal,
+                                   "when_all_vec_continuation")),
+              0);
+        }
+      }
+    };
+
+    wrappers.push_back(wrapper(std::move(tasks[i])));
+  }
+
+  // 启动所有包装任务
+  for (auto& wrapper : wrappers) {
+    wrapper.start();
   }
 
   // Awaiter

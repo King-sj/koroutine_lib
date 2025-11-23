@@ -48,55 +48,65 @@ Task<std::pair<size_t, T>> when_any(std::vector<Task<T>> tasks) {
   };
 
   auto state = std::make_shared<State>();
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(tasks.size());
 
-  // 为每个任务附加回调
+  // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    tasks[i]
-        .then([state, i](T result) {
-          // 使用原子操作确保只有第一个完成的任务设置结果
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any - task ", i,
-                      " is the first to complete successfully");
-            std::lock_guard lock(state->mtx);
-            state->result = std::make_pair(i, std::move(result));
+    auto wrapper = [state, i](Task<T> task) -> Task<void> {
+      try {
+        T result = co_await std::move(task);
 
-            // 恢复 continuation
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_continuation")),
-                  0);
-            }
-          } else {
-            LOG_TRACE("when_any - task ", i,
-                      " completed but another task finished first");
-          }
-        })
-        .catching([state, i](std::exception& e) {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any - task ", i,
-                      " is the first to complete with exception");
-            std::lock_guard lock(state->mtx);
-            state->exception = std::make_exception_ptr(e);
+        // 使用原子操作确保只有第一个完成的任务设置结果
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any - task ", i,
+                    " is the first to complete successfully");
+          std::lock_guard lock(state->mtx);
+          state->result = std::make_pair(i, std::move(result));
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_continuation")),
-                  0);
-            }
-          } else {
-            LOG_TRACE("when_any - task ", i,
-                      " failed but another task finished first");
+          // 恢复 continuation
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_continuation")),
+                0);
           }
-        })
-        .start();
+        } else {
+          LOG_TRACE("when_any - task ", i,
+                    " completed but another task finished first");
+        }
+      } catch (...) {
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any - task ", i,
+                    " is the first to complete with exception");
+          std::lock_guard lock(state->mtx);
+          state->exception = std::current_exception();
+
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_continuation")),
+                0);
+          }
+        } else {
+          LOG_TRACE("when_any - task ", i,
+                    " failed but another task finished first");
+        }
+      }
+    };
+
+    wrappers.push_back(wrapper(std::move(tasks[i])));
+  }
+
+  // 启动所有包装任务
+  for (auto& wrapper : wrappers) {
+    wrapper.start();
   }
 
   // Awaiter
@@ -169,45 +179,56 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
   };
 
   auto state = std::make_shared<State>();
+  std::vector<Task<void>> wrappers;
+  wrappers.reserve(tasks.size());
 
+  // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    tasks[i]
-        .then([state, i]() {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any(void) - task ", i, " is the first to complete");
-            std::lock_guard lock(state->mtx);
-            state->result_index = i;
+    auto wrapper = [state, i](Task<void> task) -> Task<void> {
+      try {
+        co_await std::move(task);
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_void_continuation")),
-                  0);
-            }
-          }
-        })
-        .catching([state, i](std::exception& e) {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any(void) - task ", i,
-                      " is the first to complete with exception");
-            std::lock_guard lock(state->mtx);
-            state->exception = std::make_exception_ptr(e);
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any(void) - task ", i, " is the first to complete");
+          std::lock_guard lock(state->mtx);
+          state->result_index = i;
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_void_continuation")),
-                  0);
-            }
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_void_continuation")),
+                0);
           }
-        })
-        .start();
+        }
+      } catch (...) {
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any(void) - task ", i,
+                    " is the first to complete with exception");
+          std::lock_guard lock(state->mtx);
+          state->exception = std::current_exception();
+
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_void_continuation")),
+                0);
+          }
+        }
+      }
+    };
+
+    wrappers.push_back(wrapper(std::move(tasks[i])));
+  }
+
+  // 启动所有包装任务
+  for (auto& wrapper : wrappers) {
+    wrapper.start();
   }
 
   struct WhenAnyVoidAwaiter {

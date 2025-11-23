@@ -36,17 +36,21 @@ int main() {
   LOG_DEBUG("Add Demo Started");
 
   LOG_DEBUG("creating simple_task");
-  auto task = simple_task();
-  task.then([](int result) {
-        std::cout << "Task completed with result: " << result << std::endl;
-      })
-      .catching([](std::exception& e) {
-        std::cout << "Task failed with exception: " << e.what() << std::endl;
-      })
-      .finally(
-          []() { std::cout << "Task has finished execution." << std::endl; });
+  auto final_task =
+      simple_task()
+          .then([](int result) {
+            std::cout << "Task completed with result: " << result << std::endl;
+            return result;
+          })
+          .catching([](std::exception& e) {
+            std::cout << "Task failed with exception: " << e.what()
+                      << std::endl;
+          })
+          .finally([]() {
+            std::cout << "Task has finished execution." << std::endl;
+          });
   try {
-    Runtime::block_on(std::move(task));
+    Runtime::block_on(std::move(final_task));
   } catch (const std::exception& e) {
     std::cerr << "Unhandled exception in main: " << e.what() << std::endl;
   }
