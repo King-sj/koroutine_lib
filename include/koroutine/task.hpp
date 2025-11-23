@@ -165,6 +165,8 @@ class TaskBase {
     scheduler->schedule(ScheduleRequest(handle_, std::move(meta)), 0);
   }
 
+  bool is_done() const { return !handle_ || handle_.done(); }
+
  protected:
   handle_type handle_;
 };
