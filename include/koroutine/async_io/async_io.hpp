@@ -24,21 +24,6 @@ inline Task<std::shared_ptr<AsyncIOObject>> async_open(
   co_return file;
 }
 
-// 获取标准输入
-inline std::shared_ptr<AsyncStandardStream> get_stdin() {
-  return async_stdin(get_default_io_engine());
-}
-
-// 获取标准输出
-inline std::shared_ptr<AsyncStandardStream> get_stdout() {
-  return async_stdout(get_default_io_engine());
-}
-
-// 获取标准错误
-inline std::shared_ptr<AsyncStandardStream> get_stderr() {
-  return async_stderr(get_default_io_engine());
-}
-
 // 网络连接(工厂函数)
 inline Task<std::unique_ptr<AsyncSocket>> async_connect(const std::string& host,
                                                         uint16_t port) {

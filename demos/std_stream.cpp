@@ -8,24 +8,22 @@ using namespace koroutine;
 using namespace koroutine::async_io;
 
 Task<void> run_echo() {
-  auto in = get_stdin();
-  auto out = get_stdout();
+  // auto in = get_stdin();
+  // auto out = get_stdout();
 
-  const char* msg = "Please type something (Ctrl+D to exit):\n";
-  co_await out->write(msg, std::strlen(msg));
+  co_await (cout << "Please type something (Ctrl+D to exit):\n");
 
-  char buf[128];
+  std::string buf;
   while (true) {
-    size_t n = co_await in->read(buf, sizeof(buf));
-    if (n == 0) {
+    // Read a word (space delimited)
+    co_await (cin >> buf);
+    if (buf.empty()) {
       break;
     }
-    co_await out->write("Echo: ", 6);
-    co_await out->write(buf, n);
+    co_await (cout << "Echo: " << buf << "\n");
   }
 
-  const char* bye = "Goodbye!\n";
-  co_await out->write(bye, std::strlen(bye));
+  co_await (cout << "Goodbye!\n");
 }
 
 int main() {

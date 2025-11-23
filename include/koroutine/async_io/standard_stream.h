@@ -10,6 +10,13 @@
 #include <unistd.h>
 #endif
 
+#include <cctype>
+#include <concepts>
+#include <string>
+#include <string_view>
+#include <type_traits>
+
+#include "koroutine/async_io/engin.h"
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/async_io/op.h"
 #include "koroutine/awaiters/io_awaiter.hpp"
@@ -54,31 +61,109 @@ class AsyncStandardStream
   int fd_;
 };
 
-inline std::shared_ptr<AsyncStandardStream> async_stdin(
-    std::shared_ptr<IOEngine> engine) {
+class StandardStream {
+ public:
+  enum Type { Input, Output, Error };
+
+  StandardStream() : type_(Output) {}
+  StandardStream(Type type) : type_(type) {}
+
+  Task<size_t> read(void* buf, size_t size) {
+    co_return co_await get_impl()->read(buf, size);
+  }
+
+  Task<size_t> write(const void* buf, size_t size) {
+    co_return co_await get_impl()->write(buf, size);
+  }
+
+ private:
+  std::shared_ptr<AsyncStandardStream> get_impl() {
+    if (!impl_) {
+      auto engine = get_default_io_engine();
+      int fd = 0;
+      switch (type_) {
+        case Input:
 #ifdef _WIN32
-  return std::make_shared<AsyncStandardStream>(engine, 0);
+          fd = 0;
 #else
-  return std::make_shared<AsyncStandardStream>(engine, STDIN_FILENO);
+          fd = STDIN_FILENO;
 #endif
+          break;
+        case Output:
+#ifdef _WIN32
+          fd = 1;
+#else
+          fd = STDOUT_FILENO;
+#endif
+          break;
+        case Error:
+#ifdef _WIN32
+          fd = 2;
+#else
+          fd = STDERR_FILENO;
+#endif
+          break;
+      }
+      impl_ = std::make_shared<AsyncStandardStream>(engine, fd);
+    }
+    return impl_;
+  }
+
+  Type type_;
+  std::shared_ptr<AsyncStandardStream> impl_;
+};
+
+template <typename T>
+concept Streamable = std::convertible_to<T, std::string_view> ||
+                     std::integral<T> || std::floating_point<T>;
+
+template <Streamable T>
+Task<StandardStream> operator<<(StandardStream& s, T value) {
+  if constexpr (std::convertible_to<T, std::string_view>) {
+    std::string_view sv = value;
+    co_await s.write(sv.data(), sv.size());
+  } else {
+    std::string str = std::to_string(value);
+    co_await s.write(str.data(), str.size());
+  }
+  co_return s;
 }
 
-inline std::shared_ptr<AsyncStandardStream> async_stdout(
-    std::shared_ptr<IOEngine> engine) {
-#ifdef _WIN32
-  return std::make_shared<AsyncStandardStream>(engine, 1);
-#else
-  return std::make_shared<AsyncStandardStream>(engine, STDOUT_FILENO);
-#endif
+template <Streamable T>
+Task<StandardStream> operator<<(Task<StandardStream> t, T value) {
+  StandardStream s = co_await std::move(t);
+  co_await (s << value);
+  co_return s;
 }
 
-inline std::shared_ptr<AsyncStandardStream> async_stderr(
-    std::shared_ptr<IOEngine> engine) {
-#ifdef _WIN32
-  return std::make_shared<AsyncStandardStream>(engine, 2);
-#else
-  return std::make_shared<AsyncStandardStream>(engine, STDERR_FILENO);
-#endif
+inline Task<StandardStream> operator>>(StandardStream& s, std::string& value) {
+  value.clear();
+  char c;
+  bool skip_ws = true;
+  while (true) {
+    size_t n = co_await s.read(&c, 1);
+    if (n == 0) break;
+    if (std::isspace(c)) {
+      if (skip_ws)
+        continue;
+      else
+        break;
+    }
+    skip_ws = false;
+    value.push_back(c);
+  }
+  co_return s;
 }
+
+inline Task<StandardStream> operator>>(Task<StandardStream> t,
+                                       std::string& value) {
+  StandardStream s = co_await std::move(t);
+  co_await (s >> value);
+  co_return s;
+}
+
+inline StandardStream cin(StandardStream::Input);
+inline StandardStream cout(StandardStream::Output);
+inline StandardStream cerr(StandardStream::Error);
 
 }  // namespace koroutine::async_io
