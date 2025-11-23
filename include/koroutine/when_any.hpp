@@ -1,10 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <expected>
 #include <mutex>
 #include <optional>
+#include <variant>
 #include <vector>
 
+#include "details/fire_and_forget.hpp"
 #include "task.hpp"
 
 namespace koroutine {
@@ -48,56 +51,69 @@ Task<std::pair<size_t, T>> when_any(std::vector<Task<T>> tasks) {
   };
 
   auto state = std::make_shared<State>();
+  // wrappers 不再需要存储，FireAndForget 会自动管理生命周期
+  // std::vector<Task<void>> wrappers;
+  // wrappers.reserve(tasks.size());
 
-  // 为每个任务附加回调
+  // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    tasks[i]
-        .then([state, i](T result) {
-          // 使用原子操作确保只有第一个完成的任务设置结果
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any - task ", i,
-                      " is the first to complete successfully");
-            std::lock_guard lock(state->mtx);
-            state->result = std::make_pair(i, std::move(result));
+    auto wrapper = [](size_t i, auto state,
+                      Task<T> task) -> details::FireAndForget {
+      try {
+        T result = co_await std::move(task);
 
-            // 恢复 continuation
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_continuation")),
-                  0);
-            }
-          } else {
-            LOG_TRACE("when_any - task ", i,
-                      " completed but another task finished first");
-          }
-        })
-        .catching([state, i](std::exception& e) {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any - task ", i,
-                      " is the first to complete with exception");
-            std::lock_guard lock(state->mtx);
-            state->exception = std::make_exception_ptr(e);
+        // 使用原子操作确保只有第一个完成的任务设置结果
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any - task ", i,
+                    " is the first to complete successfully");
+          std::lock_guard lock(state->mtx);
+          state->result = std::make_pair(i, std::move(result));
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_continuation")),
-                  0);
-            }
-          } else {
-            LOG_TRACE("when_any - task ", i,
-                      " failed but another task finished first");
+          // 恢复 continuation
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_continuation")),
+                0);
           }
-        })
-        .start();
+        } else {
+          LOG_TRACE("when_any - task ", i,
+                    " completed but another task finished first");
+        }
+      } catch (...) {
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any - task ", i,
+                    " is the first to complete with exception");
+          std::lock_guard lock(state->mtx);
+          state->exception = std::current_exception();
+
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_continuation")),
+                0);
+          }
+        } else {
+          LOG_TRACE("when_any - task ", i,
+                    " failed but another task finished first");
+        }
+      }
+    };
+
+    // 启动并分离任务
+    wrapper(i, state, std::move(tasks[i]));
   }
+
+  // 启动所有包装任务
+  // for (auto& wrapper : wrappers) {
+  //   wrapper.start();
+  // }
 
   // Awaiter
   struct WhenAnyAwaiter {
@@ -169,46 +185,58 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
   };
 
   auto state = std::make_shared<State>();
+  // std::vector<Task<void>> wrappers;
+  // wrappers.reserve(tasks.size());
 
+  // 为每个任务创建包装协程
   for (size_t i = 0; i < tasks.size(); ++i) {
-    tasks[i]
-        .then([state, i]() {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any(void) - task ", i, " is the first to complete");
-            std::lock_guard lock(state->mtx);
-            state->result_index = i;
+    auto wrapper = [](size_t i, auto state,
+                      Task<void> task) -> details::FireAndForget {
+      try {
+        co_await std::move(task);
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_void_continuation")),
-                  0);
-            }
-          }
-        })
-        .catching([state, i](std::exception& e) {
-          bool expected = false;
-          if (state->completed.compare_exchange_strong(expected, true)) {
-            LOG_TRACE("when_any(void) - task ", i,
-                      " is the first to complete with exception");
-            std::lock_guard lock(state->mtx);
-            state->exception = std::make_exception_ptr(e);
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any(void) - task ", i, " is the first to complete");
+          std::lock_guard lock(state->mtx);
+          state->result_index = i;
 
-            if (state->continuation && state->scheduler) {
-              state->scheduler->schedule(
-                  ScheduleRequest(
-                      state->continuation,
-                      ScheduleMetadata(ScheduleMetadata::Priority::High,
-                                       "when_any_void_continuation")),
-                  0);
-            }
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_void_continuation")),
+                0);
           }
-        })
-        .start();
+        }
+      } catch (...) {
+        bool expected = false;
+        if (state->completed.compare_exchange_strong(expected, true)) {
+          LOG_TRACE("when_any(void) - task ", i,
+                    " is the first to complete with exception");
+          std::lock_guard lock(state->mtx);
+          state->exception = std::current_exception();
+
+          if (state->continuation && state->scheduler) {
+            state->scheduler->schedule(
+                ScheduleRequest(
+                    state->continuation,
+                    ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                     "when_any_void_continuation")),
+                0);
+          }
+        }
+      }
+    };
+
+    wrapper(i, state, std::move(tasks[i]));
   }
+
+  // 启动所有包装任务
+  // for (auto& wrapper : wrappers) {
+  //   wrapper.start();
+  // }
 
   struct WhenAnyVoidAwaiter {
     std::shared_ptr<State> state;
@@ -247,6 +275,136 @@ inline Task<size_t> when_any(std::vector<Task<void>> tasks) {
   };
 
   co_return co_await WhenAnyVoidAwaiter{state};
+}
+
+namespace details {
+
+// when_any 的变参实现状态
+template <typename... ResultTypes>
+struct WhenAnyVariadicState {
+  std::atomic<bool> completed{false};
+  std::mutex mtx;
+  std::optional<std::variant<ResultTypes...>> result;
+  std::exception_ptr exception;
+  std::coroutine_handle<> continuation = nullptr;
+  std::shared_ptr<AbstractScheduler> scheduler;
+
+  WhenAnyVariadicState()
+      : scheduler(SchedulerManager::get_default_scheduler()) {}
+};
+
+}  // namespace details
+
+/**
+ * @brief 等待任意一个任务完成，返回 std::expected<std::variant<...>,
+ * std::exception_ptr>
+ *
+ * @tparam Tasks 任务类型参数包
+ * @param tasks 要等待的任务
+ * @return Task<std::expected<std::variant<ResultTypes...>, std::exception_ptr>>
+ *
+ * 使用示例:
+ * @code
+ * auto result = co_await when_any(task1(), task2());
+ * if (result) {
+ *   std::visit([](auto&& val) { std::cout << val; }, *result);
+ * } else {
+ *   // handle exception
+ * }
+ * @endcode
+ */
+template <typename... Tasks>
+  requires(details::TaskType<Tasks> && ...)
+Task<std::expected<std::variant<details::task_result_type_t<Tasks>...>,
+                   std::exception_ptr>>
+when_any(Tasks&&... tasks) {
+  using ResultVariant = std::variant<details::task_result_type_t<Tasks>...>;
+  using ReturnType = std::expected<ResultVariant, std::exception_ptr>;
+
+  auto state = std::make_shared<
+      details::WhenAnyVariadicState<details::task_result_type_t<Tasks>...>>();
+
+  // 启动包装任务
+  [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    (
+        [&]<std::size_t I, typename TaskType>(TaskType&& task) {
+          using T = details::task_result_type_t<TaskType>;
+
+          auto wrapper = [](auto state,
+                            Task<T> task) -> details::FireAndForget {
+            try {
+              T result = co_await std::move(task);
+
+              bool expected = false;
+              if (state->completed.compare_exchange_strong(expected, true)) {
+                std::lock_guard lock(state->mtx);
+                // 将结果存入 variant 的对应索引位置
+                state->result.emplace(std::in_place_index<I>,
+                                      std::move(result));
+
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                           "when_any_var_cont")),
+                      0);
+                }
+              }
+            } catch (...) {
+              bool expected = false;
+              if (state->completed.compare_exchange_strong(expected, true)) {
+                std::lock_guard lock(state->mtx);
+                state->exception = std::current_exception();
+
+                if (state->continuation && state->scheduler) {
+                  state->scheduler->schedule(
+                      ScheduleRequest(
+                          state->continuation,
+                          ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                           "when_any_var_cont")),
+                      0);
+                }
+              }
+            }
+          };
+
+          wrapper(state, std::move(task));
+        }.template operator()<Is>(std::forward<Tasks>(tasks)),
+        ...);
+  }(std::index_sequence_for<Tasks...>{});
+
+  struct Awaiter {
+    std::shared_ptr<
+        details::WhenAnyVariadicState<details::task_result_type_t<Tasks>...>>
+        state;
+
+    bool await_ready() const { return state->completed.load(); }
+
+    void await_suspend(std::coroutine_handle<> h) {
+      state->continuation = h;
+      if (state->completed.load() && state->scheduler) {
+        state->scheduler->schedule(
+            ScheduleRequest(h,
+                            ScheduleMetadata(ScheduleMetadata::Priority::High,
+                                             "when_any_var_imm")),
+            0);
+      }
+    }
+
+    ReturnType await_resume() {
+      std::lock_guard lock(state->mtx);
+      if (state->exception) {
+        return std::unexpected(state->exception);
+      }
+      if (state->result) {
+        return std::move(*state->result);
+      }
+      throw std::runtime_error("when_any: no result available");
+    }
+  };
+
+  co_return co_await Awaiter{state};
 }
 
 }  // namespace koroutine

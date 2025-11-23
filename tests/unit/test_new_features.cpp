@@ -147,15 +147,30 @@ TEST(ContinuationTest, VoidChain) {
 // ==================== when_all 测试 ====================
 
 TEST(WhenAllTest, ThreeTasks) {
-  auto task1 = []() -> Task<int> { co_return 1; };
-  auto task2 = []() -> Task<int> { co_return 2; };
-  auto task3 = []() -> Task<int> { co_return 3; };
-
-  auto combined = [&]() -> Task<std::tuple<int, int, int>> {
-    co_return co_await when_all(task1(), task2(), task3());
+  std::cout << "TEST START" << std::endl;
+  auto task1 = []() -> Task<int> {
+    std::cout << "task1 executing" << std::endl;
+    co_return 1;
+  };
+  auto task2 = []() -> Task<int> {
+    std::cout << "task2 executing" << std::endl;
+    co_return 2;
+  };
+  auto task3 = []() -> Task<int> {
+    std::cout << "task3 executing" << std::endl;
+    co_return 3;
   };
 
+  auto combined = [&]() -> Task<std::tuple<int, int, int>> {
+    std::cout << "combined start" << std::endl;
+    auto result = co_await when_all(task1(), task2(), task3());
+    std::cout << "combined done" << std::endl;
+    co_return result;
+  };
+
+  std::cout << "before block_on" << std::endl;
   auto [r1, r2, r3] = Runtime::block_on(combined());
+  std::cout << "after block_on" << std::endl;
   EXPECT_EQ(r1, 1);
   EXPECT_EQ(r2, 2);
   EXPECT_EQ(r3, 3);
@@ -164,7 +179,9 @@ TEST(WhenAllTest, ThreeTasks) {
 TEST(WhenAllTest, Vector) {
   std::vector<Task<int>> tasks;
   for (int i = 0; i < 5; ++i) {
-    tasks.push_back([i]() -> Task<int> { co_return i; }());
+    // 使用参数传递 i，确保 i 被复制到协程帧中
+    // 避免 lambda 捕获导致的悬垂引用问题（lambda 对象在协程执行前销毁）
+    tasks.push_back([](int val) -> Task<int> { co_return val; }(i));
   }
 
   auto combined = [&]() -> Task<std::vector<int>> {
@@ -380,9 +397,4 @@ TEST(IntegrationTest, SchedulerSwitching) {
   // 由于都是事件循环调度器，线程ID可能相同或不同
   // 这里只是验证不会崩溃
   SUCCEED();
-}
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
 }

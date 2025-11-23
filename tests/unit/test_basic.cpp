@@ -158,15 +158,18 @@ TEST(KoroutineTest, TaskThenCatchingFinally) {
   bool catching_called = false;
   bool finally_called = false;
 
-  auto task = []() -> Task<int> { co_return 42; }();
+  // 使用右值引用调用链式方法
+  auto final_task =
+      []() -> Task<int> { co_return 42; }()
+                  .then([&](int result) {
+                    then_called = true;
+                    EXPECT_EQ(result, 42);
+                    return result;  // 传递结果
+                  })
+                  .catching([&](std::exception&) { catching_called = true; })
+                  .finally([&]() { finally_called = true; });
 
-  task.then([&](int result) {
-        then_called = true;
-        EXPECT_EQ(result, 42);
-      })
-      .catching([&](std::exception& e) { catching_called = true; })
-      .finally([&]() { finally_called = true; });
-  Runtime::block_on(std::move(task));  // 确保任务完成
+  Runtime::block_on(std::move(final_task));  // 确保任务完成
   EXPECT_TRUE(then_called);
   EXPECT_FALSE(catching_called);
   EXPECT_TRUE(finally_called);
@@ -175,22 +178,305 @@ TEST(KoroutineTest, TaskThenCatchingFinally) {
   then_called = false;
   catching_called = false;
   finally_called = false;
-  auto error_task = []() -> Task<int> {
+  auto error_final_task =
+      []() -> Task<int> {
     throw std::runtime_error("Test exception");
     co_return 0;
-  }();
-  error_task.then([&](int result) { then_called = true; })
-      .catching([&](std::exception& e) {
-        catching_called = true;
-        EXPECT_STREQ(e.what(), "Test exception");
-      })
-      .finally([&]() { finally_called = true; });
+  }()
+                  .then([&](int) {
+                    then_called = true;
+                    return 0;
+                  })
+                  .catching([&](std::exception& e) {
+                    catching_called = true;
+                    EXPECT_STREQ(e.what(), "Test exception");
+                  })
+                  .finally([&]() { finally_called = true; });
+
   try {
-    Runtime::block_on(std::move(error_task));  // 确保任务完成
+    Runtime::block_on(std::move(error_final_task));  // 确保任务完成
   } catch (...) {
     // 忽略异常
   }
   EXPECT_FALSE(then_called);
   EXPECT_TRUE(catching_called);
   EXPECT_TRUE(finally_called);
+}
+
+// 测试 then 方法的值转换
+TEST(TaskChainTest, ThenValueTransformation) {
+  auto task = []() -> Task<int> { co_return 5; }()
+                          .then([](int x) {
+                            EXPECT_EQ(x, 5);
+                            return x * 2;
+                          })
+                          .then([](int x) {
+                            EXPECT_EQ(x, 10);
+                            return x + 3;
+                          })
+                          .then([](int x) {
+                            EXPECT_EQ(x, 13);
+                            return std::to_string(x);
+                          });
+
+  auto result = Runtime::block_on(std::move(task));
+  EXPECT_EQ(result, "13");
+}
+
+// 测试 then 方法从值类型到 void
+TEST(TaskChainTest, ThenValueToVoid) {
+  bool lambda1_called = false;
+  bool lambda2_called = false;
+
+  auto task = []() -> Task<int> { co_return 42; }()
+                          .then([&](int x) {
+                            lambda1_called = true;
+                            EXPECT_EQ(x, 42);
+                          })
+                          .then([&]() { lambda2_called = true; });
+
+  Runtime::block_on(std::move(task));
+  EXPECT_TRUE(lambda1_called);
+  EXPECT_TRUE(lambda2_called);
+}
+
+// 测试 then 方法从 void 到值类型
+TEST(TaskChainTest, ThenVoidToValue) {
+  auto task = []()
+      -> Task<void> { co_return; }().then([]() { return 100; }).then([](int x) {
+    EXPECT_EQ(x, 100);
+    return x * 2;
+  });
+
+  auto result = Runtime::block_on(std::move(task));
+  EXPECT_EQ(result, 200);
+}
+
+// 测试 then 方法链式传递 void
+TEST(TaskChainTest, ThenVoidChain) {
+  int counter = 0;
+
+  auto task = []() -> Task<void> { co_return; }()
+                          .then([&]() { counter++; })
+                          .then([&]() { counter++; })
+                          .then([&]() { counter++; });
+
+  Runtime::block_on(std::move(task));
+  EXPECT_EQ(counter, 3);
+}
+
+// 测试 catching 方法捕获异常
+TEST(TaskChainTest, CatchingHandlesException) {
+  bool catching_called = false;
+  std::string error_message;
+
+  auto task = []() -> Task<int> {
+    throw std::runtime_error("Test error");
+    co_return 0;
+  }()
+                          .catching([&](std::exception& e) {
+                            catching_called = true;
+                            error_message = e.what();
+                          });
+
+  try {
+    Runtime::block_on(std::move(task));
+    FAIL() << "Should have thrown exception";
+  } catch (const std::exception& e) {
+    EXPECT_TRUE(catching_called);
+    EXPECT_EQ(error_message, "Test error");
+    EXPECT_STREQ(e.what(), "Test error");
+  }
+}
+
+// 测试 catching 不会捕获成功的任务
+TEST(TaskChainTest, CatchingDoesNotTriggerOnSuccess) {
+  bool catching_called = false;
+
+  auto task = []() -> Task<int> { co_return 42; }().catching(
+                       [&](std::exception&) { catching_called = true; });
+
+  auto result = Runtime::block_on(std::move(task));
+  EXPECT_EQ(result, 42);
+  EXPECT_FALSE(catching_called);
+}
+
+// 测试 finally 在成功时执行
+TEST(TaskChainTest, FinallyExecutesOnSuccess) {
+  bool finally_called = false;
+
+  auto task = []() -> Task<int> { co_return 123; }().finally(
+                       [&]() { finally_called = true; });
+
+  auto result = Runtime::block_on(std::move(task));
+  EXPECT_EQ(result, 123);
+  EXPECT_TRUE(finally_called);
+}
+
+// 测试 finally 在异常时也执行
+TEST(TaskChainTest, FinallyExecutesOnException) {
+  bool finally_called = false;
+
+  auto task = []() -> Task<int> {
+    throw std::runtime_error("Error");
+    co_return 0;
+  }()
+                          .finally([&]() { finally_called = true; });
+
+  try {
+    Runtime::block_on(std::move(task));
+    FAIL() << "Should have thrown exception";
+  } catch (const std::exception&) {
+    EXPECT_TRUE(finally_called);
+  }
+}
+
+// 测试 then + catching + finally 组合（成功路径）
+TEST(TaskChainTest, FullChainSuccess) {
+  bool then_called = false;
+  bool catching_called = false;
+  bool finally_called = false;
+
+  auto task =
+      []() -> Task<int> { co_return 10; }()
+                  .then([&](int x) {
+                    then_called = true;
+                    return x * 2;
+                  })
+                  .catching([&](std::exception&) { catching_called = true; })
+                  .finally([&]() { finally_called = true; });
+
+  auto result = Runtime::block_on(std::move(task));
+  EXPECT_EQ(result, 20);
+  EXPECT_TRUE(then_called);
+  EXPECT_FALSE(catching_called);
+  EXPECT_TRUE(finally_called);
+}
+
+// 测试 then + catching + finally 组合（异常路径）
+TEST(TaskChainTest, FullChainException) {
+  bool then_called = false;
+  bool catching_called = false;
+  bool finally_called = false;
+
+  auto task =
+      []() -> Task<int> {
+    throw std::runtime_error("Error");
+    co_return 0;
+  }()
+                  .then([&](int x) {
+                    then_called = true;
+                    return x;
+                  })
+                  .catching([&](std::exception&) { catching_called = true; })
+                  .finally([&]() { finally_called = true; });
+
+  try {
+    Runtime::block_on(std::move(task));
+    FAIL() << "Should have thrown exception";
+  } catch (const std::exception&) {
+    EXPECT_FALSE(then_called);
+    EXPECT_TRUE(catching_called);
+    EXPECT_TRUE(finally_called);
+  }
+}
+
+// 测试多个 then 链式调用
+TEST(TaskChainTest, MultipleThenChain) {
+  auto task = []() -> Task<int> { co_return 1; }()
+                          .then([](int x) { return x + 1; })
+                          .then([](int x) { return x * 2; })
+                          .then([](int x) { return x + 10; })
+                          .then([](int x) { return x * 3; });
+
+  auto result = Runtime::block_on(std::move(task));
+  // (((1 + 1) * 2) + 10) * 3 = (2 * 2 + 10) * 3 = 14 * 3 = 42
+  EXPECT_EQ(result, 42);
+}
+
+// 测试 void Task 的 catching
+TEST(TaskChainTest, VoidTaskCatching) {
+  bool catching_called = false;
+
+  auto task = []() -> Task<void> {
+    throw std::runtime_error("Void error");
+    co_return;
+  }()
+                          .catching([&](std::exception& e) {
+                            catching_called = true;
+                            EXPECT_STREQ(e.what(), "Void error");
+                          });
+
+  try {
+    Runtime::block_on(std::move(task));
+    FAIL() << "Should have thrown exception";
+  } catch (const std::exception&) {
+    EXPECT_TRUE(catching_called);
+  }
+}
+
+// 测试 void Task 的 finally
+TEST(TaskChainTest, VoidTaskFinally) {
+  bool finally_called = false;
+
+  auto task = []() -> Task<void> { co_return; }().finally(
+                       [&]() { finally_called = true; });
+
+  Runtime::block_on(std::move(task));
+  EXPECT_TRUE(finally_called);
+}
+
+// 测试异常在 then 中抛出
+TEST(TaskChainTest, ExceptionInThen) {
+  bool catching_called = false;
+
+  auto task = []() -> Task<int> { co_return 42; }()
+                          .then([](int) -> int {
+                            throw std::runtime_error("Error in then");
+                            return 0;
+                          })
+                          .catching([&](std::exception& e) {
+                            catching_called = true;
+                            EXPECT_STREQ(e.what(), "Error in then");
+                          });
+
+  try {
+    Runtime::block_on(std::move(task));
+    FAIL() << "Should have thrown exception";
+  } catch (const std::exception&) {
+    EXPECT_TRUE(catching_called);
+  }
+}
+
+// 测试多个 catching 调用（只有第一个应该执行）
+TEST(TaskChainTest, MultipleCatching) {
+  int catching_count = 0;
+
+  auto task = []() -> Task<int> {
+    throw std::runtime_error("Error");
+    co_return 0;
+  }()
+                          .catching([&](std::exception&) { catching_count++; })
+                          .catching([&](std::exception&) { catching_count++; });
+
+  try {
+    Runtime::block_on(std::move(task));
+  } catch (...) {
+  }
+
+  // 两个 catching 都应该被调用，因为异常在第一个 catching 后被重新抛出
+  EXPECT_EQ(catching_count, 2);
+}
+
+// 测试多个 finally 调用
+TEST(TaskChainTest, MultipleFinally) {
+  int finally_count = 0;
+
+  auto task = []() -> Task<int> { co_return 42; }()
+                          .finally([&]() { finally_count++; })
+                          .finally([&]() { finally_count++; })
+                          .finally([&]() { finally_count++; });
+
+  Runtime::block_on(std::move(task));
+  EXPECT_EQ(finally_count, 3);
 }

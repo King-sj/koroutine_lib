@@ -95,23 +95,6 @@ struct TaskPromiseBase {
 
     // 恢复 continuation
     resume_continuation();
-
-    notify_callbacks();
-  }
-
-  void on_completed(std::function<void(Result<ResultType>&)>&& func) {
-    std::unique_lock lock(completion_lock);
-    if (result.has_value()) {
-      LOG_TRACE(
-          "TaskPromise::on_completed - task already completed, invoking "
-          "callback immediately");
-      lock.unlock();
-      func(*result);
-    } else {
-      LOG_TRACE(
-          "TaskPromise::on_completed - task not completed, storing callback");
-      completion_callbacks.push_back(std::move(func));
-    }
   }
 
   void set_scheduler(std::shared_ptr<AbstractScheduler> ex) { scheduler = ex; }
@@ -212,7 +195,6 @@ struct TaskPromiseBase {
   std::optional<Result<ResultType>> result;
   std::mutex completion_lock;
   std::condition_variable completion;
-  std::list<std::function<void(Result<ResultType>&)>> completion_callbacks;
   std::weak_ptr<AbstractScheduler> scheduler =
       SchedulerManager::get_default_scheduler();
   bool started = false;  // 防止重复启动
@@ -222,17 +204,6 @@ struct TaskPromiseBase {
 
   // Cancellation token: 用于协作式取消
   std::optional<CancellationToken> cancel_token_;
-
-  void notify_callbacks() {
-    LOG_TRACE("TaskPromise::notify_callbacks - notifying completion callbacks ",
-              completion_callbacks.size());
-    if (result.has_value()) {
-      for (auto& cb : completion_callbacks) {
-        cb(*result);  // 传递引用，回调可以决定是移动还是拷贝
-      }
-    }
-    completion_callbacks.clear();
-  }
 
  public:
   /**
@@ -263,10 +234,10 @@ struct TaskPromiseBase {
 // 通用模板 - 非 void 类型
 template <typename ResultType>
 struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
+  using result_type = ResultType;
   using Base = TaskPromiseBase<ResultType, TaskPromise<ResultType>>;
   using Base::completion;
   using Base::completion_lock;
-  using Base::notify_callbacks;
   using Base::result;
 
   // CRTP 实现
@@ -280,14 +251,13 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
 
     // 恢复 continuation
     Base::resume_continuation();
-
-    notify_callbacks();
   }
 };
 
 // void 类型的特化
 template <>
 struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
+  using result_type = void;
   using Base = TaskPromiseBase<void, TaskPromise<void>>;
 
   // CRTP 实现
@@ -301,8 +271,6 @@ struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
 
     // 恢复 continuation
     Base::resume_continuation();
-
-    notify_callbacks();
   }
 };
 

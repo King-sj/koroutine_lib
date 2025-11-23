@@ -7,6 +7,10 @@
 namespace koroutine {
 class AbstractScheduler;
 
+// 前置声明
+template <typename ResultType>
+class Task;
+
 // CRTP 基类 - 包含公共的任务管理逻辑
 template <typename ResultType, typename Derived>
 class TaskBase {
@@ -51,27 +55,69 @@ class TaskBase {
     return *this;
   }
 
-  Derived& catching(std::function<void(std::exception&)>&& func) {
-    handle_.promise().on_completed([func](Result<ResultType>& result) {
-      // 不调用 get_or_throw()，只检查是否有异常
-      if (result.has_exception()) {
-        try {
-          result.rethrow_exception();
-        } catch (std::exception& e) {
-          LOG_TRACE("Task::catching - exception caught, invoking callback");
-          func(e);
+  /**
+   * @brief 捕获异常并处理，返回新的 Task
+   * @param func 异常处理函数
+   * @return 新的 Task，可以继续链式调用
+   *
+   * 用法：
+   * @code
+   * co_await task()
+   *   .catching([](std::exception& e) {
+   *     std::cout << "Error: " << e.what() << std::endl;
+   *   });
+   * @endcode
+   */
+  Task<ResultType> catching(std::function<void(std::exception&)>&& func) && {
+    auto prev_handle = std::exchange(handle_, nullptr);
+    return [](handle_type prev_handle, auto func) -> Task<ResultType> {
+      try {
+        if constexpr (std::is_void_v<ResultType>) {
+          co_await Task<ResultType>(prev_handle);
+        } else {
+          co_return co_await Task<ResultType>(prev_handle);
         }
+      } catch (std::exception& e) {
+        LOG_TRACE("Task::catching - exception caught, invoking callback");
+        func(e);
+        throw;  // 重新抛出异常
       }
-    });
-    return static_cast<Derived&>(*this);
+    }(prev_handle, std::move(func));
   }
 
-  Derived& finally(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](Result<ResultType>& _) {
-      LOG_TRACE("Task::finally - invoking finally callback");
-      func();
-    });
-    return static_cast<Derived&>(*this);
+  /**
+   * @brief 最终清理操作，无论成功还是失败都会执行，返回新的 Task
+   * @param func 清理函数
+   * @return 新的 Task，可以继续链式调用
+   *
+   * 用法：
+   * @code
+   * co_await task()
+   *   .finally([]() {
+   *     std::cout << "Cleanup" << std::endl;
+   *   });
+   * @endcode
+   */
+  Task<ResultType> finally(std::function<void()>&& func) && {
+    auto prev_handle = std::exchange(handle_, nullptr);
+    return [](handle_type prev_handle, auto func) -> Task<ResultType> {
+      try {
+        if constexpr (std::is_void_v<ResultType>) {
+          co_await Task<ResultType>(prev_handle);
+          LOG_TRACE("Task::finally - invoking finally callback (success)");
+          func();
+        } else {
+          auto result = co_await Task<ResultType>(prev_handle);
+          LOG_TRACE("Task::finally - invoking finally callback (success)");
+          func();
+          co_return result;
+        }
+      } catch (...) {
+        LOG_TRACE("Task::finally - invoking finally callback (exception)");
+        func();
+        throw;  // 重新抛出异常
+      }
+    }(prev_handle, std::move(func));
   }
 
   /**
@@ -141,21 +187,20 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
   Task& operator=(Task&&) noexcept = default;
   ~Task() = default;
 
-  Task& then(std::function<void(ResultType)>&& func) {
-    handle_.promise().on_completed([func](Result<ResultType>& result) {
-      if (!result.has_exception()) {
-        try {
-          LOG_TRACE("Task::then - invoking then callback");
-          // 注意：这里调用 get_or_throw() 会移动值
-          // 如果有多个 then 回调，只有第一个能拿到值
-          func(result.get_or_throw());
-        } catch (std::exception& e) {
-          LOG_WARN("Task::then - exception in then callback: ", e.what());
-        }
-      }
-    });
-    return *this;
-  }
+  /**
+   * @brief 任务成功完成时执行回调，返回新的 Task
+   * @param func 处理结果的回调函数
+   * @return 新的 Task，可以继续链式调用
+   *
+   * 支持两种用法：
+   * 1. 消费结果，返回 void:
+   *    task().then([](ResultType result) { ... })  -> Task<void>
+   * 2. 转换结果，返回新值:
+   *    task().then([](ResultType result) -> NewType { return ...; })  ->
+   * Task<NewType>
+   */
+  template <typename Func>
+  auto then(Func&& func) &&;
 
  protected:
   friend class TaskAwaiter<ResultType>;
@@ -185,19 +230,77 @@ class Task<void> : public TaskBase<void, Task<void>> {
 
   ~Task() = default;
 
-  Task& then(std::function<void()>&& func) {
-    handle_.promise().on_completed([func](Result<void>& result) {
-      if (!result.has_exception()) {
-        try {
-          LOG_TRACE("Task<void>::then - invoking then callback");
-          result.get_or_throw();
-          func();
-        } catch (std::exception& e) {
-          LOG_WARN("Task<void>::then - exception in then callback: ", e.what());
-        }
+  /**
+   * @brief 任务成功完成时执行回调，返回新的 Task<void>
+   * @param func 回调函数
+   * @return 新的 Task<void>，可以继续链式调用
+   *
+   * 支持两种用法：
+   * 1. 无返回值:
+   *    task().then([]() { ... })
+   * 2. 有返回值:
+   *    task().then([]() -> NewType { return ...; })
+   */
+  template <typename Func>
+  auto then(Func&& func) && {
+    using FuncReturnType = std::invoke_result_t<Func>;
+
+    auto prev_handle = std::exchange(handle_, nullptr);
+
+    if constexpr (std::is_void_v<FuncReturnType>) {
+      // 回调返回 void，返回 Task<void>
+      return [](handle_type prev_handle, auto func) -> Task<void> {
+        co_await Task<void>(prev_handle);
+        LOG_TRACE("Task<void>::then - invoking then callback (void return)");
+        func();
+      }(prev_handle, std::forward<Func>(func));
+    } else {
+      // 回调返回新值，返回 Task<FuncReturnType>
+      return [](handle_type prev_handle, auto func) -> Task<FuncReturnType> {
+        co_await Task<void>(prev_handle);
+        LOG_TRACE("Task<void>::then - invoking then callback (value return)");
+        co_return func();
+      }(prev_handle, std::forward<Func>(func));
+    }
+  }
+
+  /**
+   * @brief 捕获异常并处理，返回新的 Task<void>
+   * @param func 异常处理函数
+   * @return 新的 Task<void>，可以继续链式调用
+   */
+  Task<void> catching(std::function<void(std::exception&)>&& func) && {
+    auto prev_handle = std::exchange(handle_, nullptr);
+    return [](handle_type prev_handle, auto func) -> Task<void> {
+      try {
+        co_await Task<void>(prev_handle);
+      } catch (std::exception& e) {
+        LOG_TRACE("Task<void>::catching - exception caught, invoking callback");
+        func(e);
+        throw;  // 重新抛出异常
       }
-    });
-    return *this;
+    }(prev_handle, std::move(func));
+  }
+
+  /**
+   * @brief 最终清理操作，返回新的 Task<void>
+   * @param func 清理函数
+   * @return 新的 Task<void>，可以继续链式调用
+   */
+  Task<void> finally(std::function<void()>&& func) && {
+    auto prev_handle = std::exchange(handle_, nullptr);
+    return [](handle_type prev_handle, auto func) -> Task<void> {
+      try {
+        co_await Task<void>(prev_handle);
+        LOG_TRACE("Task<void>::finally - invoking finally callback (success)");
+        func();
+      } catch (...) {
+        LOG_TRACE(
+            "Task<void>::finally - invoking finally callback (exception)");
+        func();
+        throw;  // 重新抛出异常
+      }
+    }(prev_handle, std::move(func));
   }
 
  protected:
@@ -218,6 +321,32 @@ inline Task<void> TaskPromise<void>::get_return_object_impl() {
   LOG_TRACE("TaskPromise<void>::get_return_object_impl - creating Task<void>");
   return Task<void>{
       std::coroutine_handle<TaskPromise<void>>::from_promise(*this)};
+}
+
+// Task<ResultType>::then 的实现必须在 Task<void> 完全定义之后
+// 因为它可能返回 Task<void>
+template <typename ResultType>
+template <typename Func>
+auto Task<ResultType>::then(Func&& func) && {
+  using FuncReturnType = std::invoke_result_t<Func, ResultType>;
+
+  auto prev_handle = std::exchange(handle_, nullptr);
+
+  if constexpr (std::is_void_v<FuncReturnType>) {
+    // 回调返回 void，返回 Task<void>
+    return [](handle_type prev_handle, auto func) -> Task<void> {
+      auto result = co_await Task<ResultType>(prev_handle);
+      LOG_TRACE("Task::then - invoking then callback (void return)");
+      func(result);
+    }(prev_handle, std::forward<Func>(func));
+  } else {
+    // 回调返回新值，返回 Task<FuncReturnType>
+    return [](handle_type prev_handle, auto func) -> Task<FuncReturnType> {
+      auto result = co_await Task<ResultType>(prev_handle);
+      LOG_TRACE("Task::then - invoking then callback (value return)");
+      co_return func(result);
+    }(prev_handle, std::forward<Func>(func));
+  }
 }
 
 }  // namespace koroutine
