@@ -18,7 +18,7 @@ Task<void> creat_write_file(const std::string& path,
   LOG_DEBUG("Waiting to write file: ", path);
   co_await io_mutex.lock();
   LOG_DEBUG("Creating and writing to file: ", path);
-  std::shared_ptr<IOEngine> engine = IOEngine::create();
+  std::shared_ptr<IOEngine> engine = get_default_io_engine();
   LOG_DEBUG("IOEngine created");
   auto file =
       co_await AsyncFile::open(engine, path, std::ios::out | std::ios::trunc);
@@ -54,7 +54,7 @@ Task<void> read_file(const std::string& path) {
     co_await completed.wait(io_mutex);
   }
   LOG_DEBUG("Reading file: ", path);
-  std::shared_ptr<IOEngine> engine = IOEngine::create();
+  std::shared_ptr<IOEngine> engine = get_default_io_engine();
   LOG_DEBUG("IOEngine created");
   auto file = co_await AsyncFile::open(engine, path, std::ios::in);
   LOG_DEBUG("File opened: ", path);
@@ -79,14 +79,6 @@ int main() {
   auto write_task = creat_write_file(file_path, file_content);
   auto read_task = read_file(file_path);
 
-  // 运行IO引擎事件循环
-  std::shared_ptr<IOEngine> engine = IOEngine::create();
-  std::thread io_thread([&engine]() {
-    LOG_DEBUG("Starting IO engine event loop");
-    engine->run();
-    LOG_DEBUG("IO engine event loop exited");
-  });
-  io_thread.detach();
   Runtime::join_all(std::move(write_task), std::move(read_task));
   //   等待任务完成
   return 0;
