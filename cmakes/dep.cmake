@@ -3,7 +3,7 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(Python3_EXECUTABLE)
     add_custom_target(codeviz
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/script/codeviz-master/codeviz.py src include -r
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/codeviz-master/codeviz.py src include -r
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Run codeviz to generate source/header visualization"
         VERBATIM

@@ -1,0 +1,60 @@
+site_name: Koroutine Library
+site_url: https://King-sj.github.io/koroutine_lib/
+repo_url: https://github.com/King-sj/koroutine_lib
+repo_name: King-sj/koroutine_lib
+edit_uri: edit/main/docs/source/
+docs_dir: docs/source
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light vs dark mode
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - '主页': 'index.md'
+  - '使用指南':
+    - '核心设计': 'design.md'
+    - '快速上手': 'guides/01-getting-started.md'
+    - 'Task 与 Generator': 'guides/02-tasks-and-generators.md'
+    - '执行器与调度器': 'guides/03-executors-and-schedulers.md'
+    - '结构化并发': 'guides/04-structured-concurrency.md'
+    - '通道 (Channel)': 'guides/05-channels.md'
+    - '异步 I/O': 'guides/06-async-io.md'
+    - '集成 & 打包': 'guides/07-integration.md'
+    - '最佳实践': 'guides/08-best-practices.md'
+    - 'API 概览': 'api_overview.md'
+  - '开发者贡献':
+    - '欢迎参与贡献': 'contributing/index.md'
+    - '核心架构': 'contributing/architecture.md'
