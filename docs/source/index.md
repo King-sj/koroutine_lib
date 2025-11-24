@@ -1,6 +1,6 @@
 # 欢迎来到 Koroutine Library
 
-`koroutine_lib` 是一个基于 C++23 的现代化协程库，专为结构化并发和高性能异步 I/O 设计。
+[`koroutine lib`](https://github.com/king-sj/koroutine_lib/) 是一个基于 C++23 的现代化协程库，专为结构化并发和高性能异步 I/O 设计。
 
 本项目文档旨在提供全面的指南，帮助你理解其核心概念、API 并将其集成到你的项目中。
 

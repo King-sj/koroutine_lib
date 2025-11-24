@@ -58,3 +58,4 @@ nav:
   - '开发者贡献':
     - '欢迎参与贡献': 'contributing/index.md'
     - '核心架构': 'contributing/architecture.md'
+  - '源码 (GitHub)': 'https://github.com/king-sj/koroutine_lib/'
