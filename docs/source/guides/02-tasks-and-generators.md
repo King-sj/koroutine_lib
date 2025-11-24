@@ -27,12 +27,12 @@ Task<void> print_message() {
 }
 
 int main() {
-    // 使用 Runtime::run 来同步等待并获取 Task 的结果
-    int answer = Runtime::run(get_answer());
+    // 使用 Runtime::block_on 来同步等待并获取 Task 的结果
+    int answer = Runtime::block_on(get_answer());
     std::cout << "The answer is: " << answer << std::endl;
 
-    // 对于 Task<void>，Runtime::run 会等待它执行完毕
-    Runtime::run(print_message());
+    // 对于 Task<void>，Runtime::block_on 会等待它执行完毕
+    Runtime::block_on(print_message());
 
     return 0;
 }
@@ -67,7 +67,7 @@ Task<void> process_user(const std::string& username) {
 }
 
 int main() {
-    Runtime::run(process_user("alice"));
+    Runtime::block_on(process_user("alice"));
 }
 ```
 
@@ -92,8 +92,8 @@ int main() {
         std::cerr << "Caught exception: " << e.what() << std::endl;
     });
 
-    // Runtime::run 会执行任务，如果发生异常，处理器会被调用
-    Runtime::run(std::move(handled_task));
+    // Runtime::block_on 会执行任务，如果发生异常，处理器会被调用
+    Runtime::block_on(std::move(handled_task));
 }
 ```
 
@@ -115,7 +115,7 @@ int main() {
         std::cout << "Releasing resource..." << std::endl;
     });
 
-    Runtime::run(std::move(final_task));
+    Runtime::block_on(std::move(final_task));
 }
 ```
 

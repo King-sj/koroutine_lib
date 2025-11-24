@@ -73,7 +73,7 @@ Task<void> async_copy_file(const std::string& src_path, const std::string& dest_
 int main() {
     // 确保你的程序启动了 IO 调度器
     SchedulerManager::create_io_scheduler();
-    Runtime::run(async_copy_file("input.txt", "output.txt"));
+    Runtime::block_on(async_copy_file("input.txt", "output.txt"));
 }
 ```
 
@@ -132,7 +132,7 @@ Task<void> http_get_example(const std::string& host, uint16_t port, const std::s
 
 int main() {
     SchedulerManager::create_io_scheduler();
-    Runtime::run(http_get_example("example.com", 80, "/"));
+    Runtime::block_on(http_get_example("example.com", 80, "/"));
 }
 ```
 

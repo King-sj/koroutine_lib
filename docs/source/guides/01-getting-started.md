@@ -49,8 +49,8 @@ Task<std::string> get_greeting() {
 }
 
 int main() {
-    // Runtime::run 会启动一个事件循环，并运行传入的任务直到完成
-    std::string result = Runtime::run(get_greeting());
+    // Runtime::block_on 会启动一个事件循环，并运行传入的任务直到完成
+    std::string result = Runtime::block_on(get_greeting());
 
     std::cout << "协程执行完毕，结果: " << result << std::endl;
 

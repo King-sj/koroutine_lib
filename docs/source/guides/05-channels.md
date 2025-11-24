@@ -71,7 +71,7 @@ int main() {
     auto channel = std::make_shared<Channel<int>>(2); // 容量为 2
 
     // 并发运行生产者和消费者
-    Runtime::run(when_all(
+    Runtime::block_on(when_all(
         producer(channel),
         consumer(channel)
     ));

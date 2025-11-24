@@ -83,7 +83,7 @@ int main() {
     SchedulerManager::create_compute_scheduler(1); // 默认调度器
     SchedulerManager::create_io_scheduler();       // IO调度器
 
-    Runtime::run(process_data_and_write_to_file("my_data"));
+    Runtime::block_on(process_data_and_write_to_file("my_data"));
 }
 ```
 

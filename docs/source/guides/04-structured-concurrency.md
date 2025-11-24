@@ -42,7 +42,7 @@ Task<void> main_task() {
 }
 
 int main() {
-    Runtime::run(main_task());
+    Runtime::block_on(main_task());
 }
 ```
 
@@ -87,7 +87,7 @@ Task<void> main_task() {
 }
 
 int main() {
-    Runtime::run(main_task());
+    Runtime::block_on(main_task());
 }
 ```
 
