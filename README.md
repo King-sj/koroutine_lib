@@ -110,7 +110,7 @@ cd build && ctest -V
 
 ## 文档
 
-更详细的设计文档、API 参考和使用指南，请访问我们的 **[在线文档](https://king-sj.github.io/koroutine_lib/)** (部署中)。
+更详细的设计文档、API 参考和使用指南，请访问我们的 **[在线文档](https://docs.koroutine.bupt.online/)** 。
 
 你也可以在 `docs/` 目录下找到原始 Markdown 文档。
 
