@@ -27,5 +27,5 @@ jobs:
       - name: Deploy to GitHub Pages
         env:
           GH_PAGES: ${{ secrets.GH_PAGES }}
-        # 使用 --cname 来写入 CNAME 文件，确保自定义域不会被覆盖
-        run: mkdocs gh-deploy --force --cname "docs.koroutine.bupt.online"
+        # 部署：不使用 --cname（在 source 中添加 CNAME 文件来保留自定义域）
+        run: mkdocs gh-deploy --force
