@@ -162,13 +162,4 @@ sequenceDiagram
 - 运行时: `include/koroutine/runtime.hpp`
 - Async I/O: `include/koroutine/async_io/*`
 
----
-
-如果你希望，我可以：
-
-- 生成一套更详细的序列图（按函数/文件逐层展开）；
-- 把上述“参考文件索引”转换为 MkDocs 中每个头文件的链接（基于生成的 API 参考或手动页面）；
-- 为关键路径（Task->Scheduler->Executor）添加微基准测试示例以验证延迟/吞吐。
-
-结束。
 
