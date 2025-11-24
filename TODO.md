@@ -1,8 +1,4 @@
 # Koroutine 重构 / 功能 TODO 列表
-4. 为 via、switch_executor、sleep-via-executor 等新特性添加单元测试。
-5. 更新 README / docs / 使用示例，说明新的 executor 绑定模型和 API（via、switch_executor、ExecutorManager）。
-7. 在 CI 中运行完整构建与测试。
-
 - [ ] 与std::future的整合：允许co_await直接等待std::future，消除两者的割裂
 - [ ] 提供 coroutine_scope 或类似机制，确保在一个作用域内启动的所有协程都在离开该作用域前完成或被取消。这能极大地避免资源泄漏和僵尸任务，是现代异步框架（如 Swift, Kotlin）的标志性特性。
 - [ ] 提供一套标准的、协作式的取消机制。当一个协程任务不再需要时，可以安全地通知它停止工作并释放资源。
@@ -45,3 +41,7 @@
 - [ ] **采用现代 C++ 特性**
   - [ ] 迁移到 `std::expected` (C++23) 进行错误处理，替代部分异常。
   - [ ] 评估 `std::lazy` (C++26) 与当前 `Task` 的异同，保持设计理念一致。
+
+- [ ] **cpp modules 支持**
+  - [ ] 将项目迁移到 C++20 模块系统，提升编译速度和模块化程度。
+  - [ ] 确保与现有构建系统（如 CMake）的兼容性。
