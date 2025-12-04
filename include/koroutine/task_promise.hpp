@@ -89,9 +89,11 @@ struct TaskPromiseBase {
   }
 
   void unhandled_exception() {
-    std::lock_guard lock(completion_lock);
-    result = Result<ResultType>(std::current_exception());
-    completion.notify_all();
+    {
+      std::lock_guard lock(completion_lock);
+      result = Result<ResultType>(std::current_exception());
+      completion.notify_all();
+    }
 
     // 恢复 continuation
     resume_continuation();
@@ -245,9 +247,11 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
 
   void return_value(ResultType value) {
     LOG_TRACE("TaskPromise::return_value - returning value");
-    std::lock_guard lock(completion_lock);
-    result = Result<ResultType>(std::move(value));
-    completion.notify_all();
+    {
+      std::lock_guard lock(completion_lock);
+      result = Result<ResultType>(std::move(value));
+      completion.notify_all();
+    }
 
     // 恢复 continuation
     Base::resume_continuation();
@@ -265,9 +269,11 @@ struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
 
   void return_void() {
     LOG_TRACE("TaskPromise<void>::return_void - returning void");
-    std::lock_guard lock(completion_lock);
-    result = Result<void>();
-    completion.notify_all();
+    {
+      std::lock_guard lock(completion_lock);
+      result = Result<void>();
+      completion.notify_all();
+    }
 
     // 恢复 continuation
     Base::resume_continuation();
