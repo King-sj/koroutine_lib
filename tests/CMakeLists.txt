@@ -14,7 +14,7 @@ file(GLOB_RECURSE UNIT_TEST_SOURCES
 function(add_unit_test_from_file SRC)
     # 从文件名生成目标名，例如 unit/test_basic.cpp -> test_test_basic
     get_filename_component(TEST_NAME ${SRC} NAME_WE)
-    set(TGT "test_${TEST_NAME}")
+    set(TGT "${TEST_NAME}")
 
     add_executable(${TGT} ${SRC})
 

@@ -14,13 +14,7 @@
 using namespace koroutine;
 using namespace koroutine::async_io;
 
-struct TaskEntry {
-  std::shared_ptr<Task<void>> task;
-  CancellationTokenSource cts;
-  std::string name;
-};
-
-std::map<std::string, TaskEntry> tasks;
+TaskManager manager;
 
 std::vector<std::string> split(const std::string& s) {
   std::vector<std::string> tokens;
@@ -32,13 +26,13 @@ std::vector<std::string> split(const std::string& s) {
   return tokens;
 }
 
-Task<void> background_task(std::string name, int interval_sec, int duration_sec,
-                           CancellationToken token) {
+Task<void> background_task(std::string name, int interval_sec,
+                           int duration_sec) {
   auto start_time = std::chrono::steady_clock::now();
 
   try {
     co_await (cout << "Task [" << name << "] is running\n");
-    while (!token.is_cancelled()) {
+    while (true) {
       if (duration_sec > 0) {
         auto now = std::chrono::steady_clock::now();
         auto elapsed =
@@ -49,11 +43,13 @@ Task<void> background_task(std::string name, int interval_sec, int duration_sec,
         }
       }
 
-      // Check cancellation before sleep
-      if (token.is_cancelled()) break;
+      // Cancellation is signaled via the promise await_transform, so sleep may
+      // throw OperationCancelledException when cancelled.
       co_await (cout << "Task [" << name << "] tick\n");
       co_await SleepAwaiter(interval_sec * 1000);
     }
+  } catch (const OperationCancelledException& e) {
+    std::cerr << "Task [" << name << "] cancelled\n";
   } catch (...) {
     // Handle cancellation or other errors
     std::cerr << "Task [" << name << "] cancelled or error occurred\n";
@@ -98,21 +94,9 @@ Task<void> run_cli() {
     if (cmd == "exit") {
       co_await (cout << "Stopping all tasks...\n");
 
-      for (auto& [name, entry] : tasks) {
-        entry.cts.cancel();
-      }
+      manager.sync_shutdown();
 
-      while (!tasks.empty()) {
-        for (auto it = tasks.begin(); it != tasks.end();) {
-          if (it->second.task->is_done()) {
-            it = tasks.erase(it);
-          } else {
-            ++it;
-          }
-        }
-        if (tasks.empty()) break;
-        co_await SleepAwaiter(100);
-      }
+      // everything is stopped by manager
       break;
     } else if (cmd == "start") {
       if (tokens.size() < 2) {
@@ -126,24 +110,24 @@ Task<void> run_cli() {
       if (tokens.size() >= 3) interval = std::stoi(tokens[2]);
       if (tokens.size() >= 4) duration = std::stoi(tokens[3]);
 
-      // Clean up finished tasks with same name if any (though map prevents
-      // duplicates)
-      auto it = tasks.find(name);
-      if (it != tasks.end()) {
-        if (it->second.task->is_done()) {
-          tasks.erase(it);
-        } else {
-          co_await (cout << "Task " << name << " is already running.\n");
-          continue;
+      // If group is running, refuse to start a duplicate
+      auto groups = manager.list_groups();
+      bool exists = false;
+      for (auto& p : groups) {
+        if (p.first == name) {
+          exists = true;
+          break;
         }
       }
+      if (exists) {
+        co_await (cout << "Task " << name << " is already running.\n");
+        continue;
+      }
 
-      CancellationTokenSource cts;
       auto t_ptr = std::make_shared<Task<void>>(
-          background_task(name, interval, duration, cts.token()));
-
-      t_ptr->start();
-      tasks.insert({name, {t_ptr, cts, name}});
+          background_task(name, interval, duration));
+      // submit and manager will set cancellation token and start
+      manager.submit_to_group(name, t_ptr);
       co_await (cout << "Started task " << name << "\n");
 
     } else if (cmd == "cancel") {
@@ -152,23 +136,14 @@ Task<void> run_cli() {
         continue;
       }
       std::string name = tokens[1];
-      auto it = tasks.find(name);
-      if (it != tasks.end()) {
-        it->second.cts.cancel();
-        co_await (cout << "Signal sent to cancel task " << name << "\n");
-      } else {
-        co_await (cout << "Task " << name << " not found.\n");
-      }
+      // Manager will cancel group
+      manager.sync_cancel_group(name);
+      co_await (cout << "Signal sent to cancel task " << name << "\n");
     } else if (cmd == "list") {
       co_await (cout << "Current Tasks:\n");
-      for (auto it = tasks.begin(); it != tasks.end();) {
-        if (it->second.task->is_done()) {
-          // Lazy cleanup
-          it = tasks.erase(it);
-        } else {
-          co_await (cout << "  " << it->first << " (Running)\n");
-          ++it;
-        }
+      auto groups = manager.list_groups();
+      for (auto& g : groups) {
+        co_await (cout << "  " << g.first << " (" << g.second << " Running)\n");
       }
     } else {
       co_await (cout << "Unknown command: " << cmd << "\n");
