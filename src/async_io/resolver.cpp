@@ -20,6 +20,47 @@
 
 namespace koroutine::async_io {
 
+struct ResolveAwaiter
+    : public AwaiterBase<std::expected<std::vector<Endpoint>, int>> {
+  std::string host;
+  std::string service;
+
+  ResolveAwaiter(std::string h, std::string s)
+      : host(std::move(h)), service(std::move(s)) {}
+
+ protected:
+  void after_suspend() override {
+    // TODO: Use NewThreadExecutor to run blocking getaddrinfo
+    // In a real system, we might use a thread pool
+    static auto executor = std::make_shared<NewThreadExecutor>();
+
+    executor->execute([this, handle = this->_caller_handle]() {
+      struct addrinfo hints, *res = nullptr;
+      std::memset(&hints, 0, sizeof(hints));
+      hints.ai_family = AF_UNSPEC;
+      hints.ai_socktype = SOCK_STREAM;
+
+      int err = getaddrinfo(host.c_str(), service.c_str(), &hints, &res);
+      if (err != 0) {
+        this->resume(std::unexpected(err));
+        return;
+      }
+
+      std::vector<Endpoint> endpoints;
+      for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+        endpoints.emplace_back(p->ai_addr,
+                               static_cast<socklen_t>(p->ai_addrlen));
+      }
+
+      if (res) {
+        freeaddrinfo(res);
+      }
+
+      this->resume(std::move(endpoints));
+    });
+  }
+};
+
 Task<std::expected<std::vector<Endpoint>, int>> Resolver::resolve(
     const std::string& host, uint16_t port) {
   co_return co_await resolve(host, std::to_string(port));
@@ -27,26 +68,10 @@ Task<std::expected<std::vector<Endpoint>, int>> Resolver::resolve(
 
 Task<std::expected<std::vector<Endpoint>, int>> Resolver::resolve(
     const std::string& host, const std::string& service) {
-  struct addrinfo hints, *res = nullptr;
-  std::memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;  // Allow IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM;
-
-  // fprintf(stderr, "DEBUG: Resolving %s:%s\n", host.c_str(),
-  // service.c_str());
-  // TODO: Offload to thread pool to avoid blocking event loop
-  int err = getaddrinfo(host.c_str(), service.c_str(), &hints, &res);
-  if (err != 0) {
-    co_return std::unexpected(err);
-  }
-  std::vector<Endpoint> result;
-  for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-    result.emplace_back(p->ai_addr, static_cast<socklen_t>(p->ai_addrlen));
-  }
-  if (res) {
-    freeaddrinfo(res);
-  }
-  co_return result;
+  ResolveAwaiter awaiter(host, service);
+  // Install the current scheduler so we can resume on it
+  awaiter.install_scheduler(SchedulerManager::get_default_scheduler());
+  co_return co_await std::move(awaiter);
 }
 
 }  // namespace koroutine::async_io

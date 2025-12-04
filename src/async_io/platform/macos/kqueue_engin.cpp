@@ -60,10 +60,12 @@ void KqueueIOEngine::run() {
         switch (op->type) {
           case OpType::READ:
           case OpType::ACCEPT:
+          case OpType::RECVFROM:
             process_read(op);
             break;
           case OpType::WRITE:
           case OpType::CONNECT:
+          case OpType::SENDTO:
             process_write(op);
             break;
           case OpType::CLOSE:
@@ -155,6 +157,25 @@ void KqueueIOEngine::run() {
             op->error = std::make_error_code(static_cast<std::errc>(error));
           } else {
             op->actual_size = 0;
+          }
+        } else if (op->type == OpType::RECVFROM) {
+          op->addr_len = sizeof(op->addr);
+          ssize_t n = ::recvfrom(static_cast<int>(fd), op->buffer, op->size, 0,
+                                 (struct sockaddr*)&op->addr, &op->addr_len);
+          if (n < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+            op->actual_size = 0;
+          } else {
+            op->actual_size = static_cast<size_t>(n);
+          }
+        } else if (op->type == OpType::SENDTO) {
+          ssize_t n = ::sendto(static_cast<int>(fd), op->buffer, op->size, 0,
+                               (const struct sockaddr*)&op->addr, op->addr_len);
+          if (n < 0) {
+            op->error = std::make_error_code(static_cast<std::errc>(errno));
+            op->actual_size = 0;
+          } else {
+            op->actual_size = static_cast<size_t>(n);
           }
         }
       }

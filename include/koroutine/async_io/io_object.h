@@ -9,6 +9,8 @@ enum class OpType {
   CONNECT,
   ACCEPT,
   OPEN,
+  RECVFROM,
+  SENDTO,
 };
 // 前向声明
 class IOEngine;

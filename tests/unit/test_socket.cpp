@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "koroutine/async_io/async_io.hpp"
+#include "koroutine/async_io/resolver.h"
 #include "koroutine/koroutine.h"
 
 using namespace koroutine;
@@ -179,6 +180,88 @@ TEST_F(SocketTest, DNSResolution) {
     };
 
     co_await koroutine::when_all(server_task(server), client_task());
+  };
+  Runtime::block_on(test_logic());
+}
+
+TEST_F(SocketTest, DNSResolutionComplex) {
+  auto test_logic = [&]() -> Task<void> {
+    // 1. Test resolving invalid host
+    auto result =
+        co_await Resolver::resolve("invalid.host.name.that.does.not.exist", 80);
+    EXPECT_FALSE(result.has_value());
+
+    // 2. Test resolving service name
+    // "http" usually maps to 80
+    auto result_http = co_await Resolver::resolve("localhost", "http");
+    // We expect success or at least a valid return (even if empty if localhost
+    // not defined, but localhost usually is)
+    if (result_http) {
+      bool found_80 = false;
+      for (const auto& ep : result_http.value()) {
+        if (ep.port() == 80) {
+          found_80 = true;
+          break;
+        }
+      }
+      EXPECT_TRUE(found_80);
+    }
+
+    // 3. Concurrent resolutions
+    auto run_resolve = [](std::string host, uint16_t port) -> Task<bool> {
+      auto res = co_await Resolver::resolve(host, port);
+      co_return res.has_value() && !res.value().empty();
+    };
+
+    auto [r1, r2] = co_await koroutine::when_all(
+        run_resolve("localhost", 80), run_resolve("127.0.0.1", 8080));
+
+    EXPECT_TRUE(r1);
+    EXPECT_TRUE(r2);
+  };
+  Runtime::block_on(test_logic());
+}
+
+TEST_F(SocketTest, DNSResolutionRealWorld) {
+  auto test_logic = [&]() -> Task<void> {
+    // Test resolving real world domains
+    // Note: This test requires internet connection
+
+    // 1. Resolve google.com
+    auto result_google = co_await Resolver::resolve("google.com", 80);
+    if (result_google) {
+      EXPECT_FALSE(result_google.value().empty());
+      for (const auto& ep : result_google.value()) {
+        // Just print for debug info, don't fail if IP is weird
+        // std::cout << "google.com resolved to: " << ep.address().to_string()
+        // << std::endl;
+        EXPECT_EQ(ep.port(), 80);
+      }
+    } else {
+      // If network is down, we might get an error.
+      // We can warn but maybe not fail hard if it's just network issue?
+      // For now let's assume test environment has network.
+      // If not, this test might be flaky.
+      std::cerr << "Failed to resolve google.com: " << result_google.error()
+                << std::endl;
+    }
+
+    // 2. Resolve baidu.com
+    auto result_baidu = co_await Resolver::resolve("baidu.com", 443);
+    if (result_baidu) {
+      EXPECT_FALSE(result_baidu.value().empty());
+      for (const auto& ep : result_baidu.value()) {
+        EXPECT_EQ(ep.port(), 443);
+      }
+    } else {
+      std::cerr << "Failed to resolve baidu.com: " << result_baidu.error()
+                << std::endl;
+    }
+    // print ip addresses for debug
+    for (const auto& ep : result_baidu.value()) {
+      std::cout << "baidu.com resolved to: " << ep.address().to_string()
+                << std::endl;
+    }
   };
   Runtime::block_on(test_logic());
 }

@@ -161,4 +161,35 @@ class AsyncServerSocket
   intptr_t sockfd_;
 };
 
+class AsyncUDPSocket : public AsyncIOObject,
+                       public std::enable_shared_from_this<AsyncUDPSocket> {
+ public:
+  static Task<std::shared_ptr<AsyncUDPSocket>> create(
+      IPAddress::Type type = IPAddress::Type::IPv4);
+  static Task<std::shared_ptr<AsyncUDPSocket>> create(
+      std::shared_ptr<IOEngine> engine,
+      IPAddress::Type type = IPAddress::Type::IPv4);
+
+  AsyncUDPSocket(std::shared_ptr<IOEngine> engine, intptr_t sockfd);
+  ~AsyncUDPSocket();
+
+  Task<void> bind(const Endpoint& endpoint);
+  Task<void> connect(const Endpoint& endpoint);
+
+  Task<size_t> send_to(const void* buf, size_t size, const Endpoint& endpoint);
+  Task<std::pair<size_t, Endpoint>> recv_from(void* buf, size_t size);
+
+  // AsyncIOObject interface
+  Task<size_t> read(void* buf, size_t size) override;
+  Task<size_t> write(const void* buf, size_t size) override;
+  Task<void> close() override;
+  intptr_t native_handle() const override { return sockfd_; }
+
+  Endpoint local_endpoint() const;
+  Endpoint remote_endpoint() const;
+
+ private:
+  intptr_t sockfd_;
+};
+
 }  // namespace koroutine::async_io

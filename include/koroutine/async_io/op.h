@@ -1,5 +1,14 @@
 #pragma once
 #include <coroutine>
+#include <cstring>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 #include "koroutine/async_io/io_object.h"
 #include "koroutine/scheduler_manager.h"
@@ -18,6 +27,10 @@ class AsyncIOOp {
   std::coroutine_handle<> coro_handle;           // 协程句柄
   std::shared_ptr<AbstractScheduler> scheduler;  // 调度器指针
 
+  // For UDP
+  struct sockaddr_storage addr;
+  socklen_t addr_len;
+
   AsyncIOOp(OpType op_type, std::shared_ptr<AsyncIOObject> obj, void* buf,
             size_t sz)
       : type(op_type),
@@ -25,8 +38,10 @@ class AsyncIOOp {
         buffer(buf),
         size(sz),
         actual_size(0),
-        error() {
+        error(),
+        addr_len(sizeof(addr)) {
     scheduler = SchedulerManager::get_default_scheduler();
+    std::memset(&addr, 0, sizeof(addr));
   }
 
   void complete() {

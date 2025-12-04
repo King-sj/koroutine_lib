@@ -355,4 +355,141 @@ Endpoint AsyncServerSocket::local_endpoint() const {
   return Endpoint((struct sockaddr*)&addr, len);
 }
 
+// --- AsyncUDPSocket ---
+
+Task<std::shared_ptr<AsyncUDPSocket>> AsyncUDPSocket::create(
+    IPAddress::Type type) {
+  return create(get_default_io_engine(), type);
+}
+
+Task<std::shared_ptr<AsyncUDPSocket>> AsyncUDPSocket::create(
+    std::shared_ptr<IOEngine> engine, IPAddress::Type type) {
+  int domain = (type == IPAddress::Type::IPv4) ? AF_INET : AF_INET6;
+  int sock_type = SOCK_DGRAM;
+  int protocol = 0;
+
+#ifdef _WIN32
+  SOCKET sockfd = ::socket(domain, sock_type, protocol);
+  if (sockfd == INVALID_SOCKET) {
+    throw std::system_error(WSAGetLastError(), std::system_category(),
+                            "Failed to create socket");
+  }
+  intptr_t fd = static_cast<intptr_t>(sockfd);
+#else
+  intptr_t fd = ::socket(domain, sock_type, protocol);
+  if (fd < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to create socket");
+  }
+#endif
+
+  try {
+    set_nonblocking(fd);
+  } catch (...) {
+    close_socket(fd);
+    throw;
+  }
+
+  co_return std::make_shared<AsyncUDPSocket>(engine, fd);
+}
+
+AsyncUDPSocket::AsyncUDPSocket(std::shared_ptr<IOEngine> engine,
+                               intptr_t sockfd)
+    : AsyncIOObject(engine), sockfd_(sockfd) {}
+
+AsyncUDPSocket::~AsyncUDPSocket() {
+  // User should call close()
+}
+
+Task<void> AsyncUDPSocket::bind(const Endpoint& endpoint) {
+  if (::bind(static_cast<int>(sockfd_), endpoint.data(), endpoint.length()) <
+      0) {
+#ifdef _WIN32
+    throw std::system_error(WSAGetLastError(), std::system_category(),
+                            "Bind failed");
+#else
+    throw std::system_error(errno, std::generic_category(), "Bind failed");
+#endif
+  }
+  co_return;
+}
+
+Task<void> AsyncUDPSocket::connect(const Endpoint& endpoint) {
+  if (::connect(static_cast<int>(sockfd_), endpoint.data(), endpoint.length()) <
+      0) {
+#ifdef _WIN32
+    throw std::system_error(WSAGetLastError(), std::system_category(),
+                            "Connect failed");
+#else
+    throw std::system_error(errno, std::generic_category(), "Connect failed");
+#endif
+  }
+  co_return;
+}
+
+Task<size_t> AsyncUDPSocket::send_to(const void* buf, size_t size,
+                                     const Endpoint& endpoint) {
+  auto io_op = std::make_shared<AsyncIOOp>(OpType::SENDTO, shared_from_this(),
+                                           const_cast<void*>(buf), size);
+
+  if (endpoint.length() > sizeof(io_op->addr)) {
+    throw std::invalid_argument("Endpoint address too large");
+  }
+  std::memcpy(&io_op->addr, endpoint.data(), endpoint.length());
+  io_op->addr_len = endpoint.length();
+
+  co_return co_await IOAwaiter<size_t>{io_op};
+}
+
+Task<std::pair<size_t, Endpoint>> AsyncUDPSocket::recv_from(void* buf,
+                                                            size_t size) {
+  auto io_op = std::make_shared<AsyncIOOp>(OpType::RECVFROM, shared_from_this(),
+                                           buf, size);
+
+  size_t n = co_await IOAwaiter<size_t>{io_op};
+
+  Endpoint ep((struct sockaddr*)&io_op->addr, io_op->addr_len);
+  co_return std::make_pair(n, ep);
+}
+
+Task<size_t> AsyncUDPSocket::read(void* buf, size_t size) {
+  auto io_op =
+      std::make_shared<AsyncIOOp>(OpType::READ, shared_from_this(), buf, size);
+  co_return co_await IOAwaiter<size_t>{io_op};
+}
+
+Task<size_t> AsyncUDPSocket::write(const void* buf, size_t size) {
+  auto io_op = std::make_shared<AsyncIOOp>(OpType::WRITE, shared_from_this(),
+                                           const_cast<void*>(buf), size);
+  co_return co_await IOAwaiter<size_t>{io_op};
+}
+
+Task<void> AsyncUDPSocket::close() {
+  auto io_op = std::make_shared<AsyncIOOp>(OpType::CLOSE, shared_from_this(),
+                                           nullptr, 0);
+  co_await IOAwaiter<void>{io_op};
+}
+
+Endpoint AsyncUDPSocket::local_endpoint() const {
+  struct sockaddr_storage addr;
+  socklen_t len = sizeof(addr);
+  if (::getsockname(static_cast<int>(sockfd_), (struct sockaddr*)&addr, &len) <
+      0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "getsockname failed");
+  }
+  return Endpoint((struct sockaddr*)&addr, len);
+}
+
+Endpoint AsyncUDPSocket::remote_endpoint() const {
+  struct sockaddr_storage addr;
+  socklen_t len = sizeof(addr);
+  if (::getpeername(static_cast<int>(sockfd_), (struct sockaddr*)&addr, &len) <
+      0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "getpeername failed");
+  }
+  return Endpoint((struct sockaddr*)&addr, len);
+}
+
 }  // namespace koroutine::async_io
