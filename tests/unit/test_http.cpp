@@ -14,7 +14,7 @@ class HttpTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Setup code if needed
-    debug::set_level(debug::Level::Warn);
+    debug::set_level(debug::Level::Debug);
     debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                             debug::Detail::ThreadId | debug::Detail::FileLine);
   }
@@ -118,12 +118,19 @@ TEST_F(HttpTest, LargeHeaders) {
       co_return;
     });
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
     {
       Client cli("http://127.0.0.1:8083");
@@ -156,12 +163,19 @@ TEST_F(HttpTest, NotFound) {
     auto svr = std::make_shared<Server>();
     int port = 8084;
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
     Client cli("http://127.0.0.1:8084");
 
@@ -188,25 +202,48 @@ TEST_F(HttpTest, ConcurrentRequests) {
       co_return;
     });
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
-    Client cli("http://127.0.0.1:8085");
+    Client cli1("http://127.0.0.1:8085");
+    Client cli2("http://127.0.0.1:8085");
+    Client cli3("http://127.0.0.1:8085");
 
-    auto req1 = cli.Get("/sleep");
-    auto req2 = cli.Get("/sleep");
-    auto req3 = cli.Get("/sleep");
+    // auto req1 = cli1.Get("/sleep");
+    // auto req2 = cli2.Get("/sleep");
+    // auto req3 = cli3.Get("/sleep");
+
+    // add some different delays
+    auto req1 = []() -> Task<httplib::Result> {
+      co_await koroutine::SleepAwaiter(10);
+      co_return co_await Client("http://127.0.0.1:8085").Get("/sleep");
+    }();
+    auto req2 = []() -> Task<httplib::Result> {
+      co_await koroutine::SleepAwaiter(20);
+      co_return co_await Client("http://127.0.0.1:8085").Get("/sleep");
+    }();
+    auto req3 = []() -> Task<httplib::Result> {
+      co_await koroutine::SleepAwaiter(30);
+      co_return co_await Client("http://127.0.0.1:8085").Get("/sleep");
+    }();
 
     auto [r1, r2, r3] =
         co_await when_all(std::move(req1), std::move(req2), std::move(req3));
 
-    EXPECT_TRUE(r1);
-    EXPECT_TRUE(r2);
-    EXPECT_TRUE(r3);
+    EXPECT_TRUE(r1) << "Error: " << (int)r1.error();
+    EXPECT_TRUE(r2) << "Error: " << (int)r2.error();
+    EXPECT_TRUE(r3) << "Error: " << (int)r3.error();
 
     if (r1) EXPECT_EQ(r1->status, 200);
     if (r2) EXPECT_EQ(r2->status, 200);
@@ -228,12 +265,19 @@ TEST_F(HttpTest, LargeBody) {
       co_return;
     });
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
     Client cli("http://127.0.0.1:8086");
 
@@ -262,12 +306,19 @@ TEST_F(HttpTest, KeepAlive) {
       co_return;
     });
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
     Client cli("http://127.0.0.1:8087");
     cli.set_keep_alive(true);
@@ -302,12 +353,19 @@ TEST_F(HttpTest, MultipartFormData) {
       co_return;
     });
 
-    auto server_task = [svr, port]() -> Task<void> {
-      co_await svr->listen_async("127.0.0.1", port);
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      try {
+        co_await svr->listen_async("127.0.0.1", port);
+      } catch (const std::exception& e) {
+        std::cout << "Server listen threw exception: " << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "Server listen threw unknown exception" << std::endl;
+      }
     };
-    koroutine::Runtime::spawn(server_task());
+    koroutine::Runtime::spawn(server_task(svr, port));
 
     co_await koroutine::SleepAwaiter(100);
+    EXPECT_EQ(svr->bind_port(), port);
 
     Client cli("http://127.0.0.1:8088");
 

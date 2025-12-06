@@ -4,6 +4,8 @@
 
 `task_checker` 是一个用于检测 C++ 代码中常见协程错误的工具，特别是检测 `Task` 对象是否被正确 `co_await`。
 
+~~笔者在支持 http 时，直接通过模块 cpp-httplib 实现的（他是一个 blocking 的 http 库）, 导致出现了大量的直接返回 Task 对象但没有 co_await 的错误，最终导致协程无法正确执行。为了解决这个问题，编写了 `task_checker` 工具来自动检测这些错误。~~
+
 ### 安装
 
 该工具位于 `tools/task_checker` 目录下。你需要安装 Python 3.10+ 和 `uv` 包管理器。
