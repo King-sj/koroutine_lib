@@ -231,8 +231,9 @@ void KqueueIOEngine::stop() {
 bool KqueueIOEngine::is_running() { return running_.load(); }
 
 void KqueueIOEngine::process_read(std::shared_ptr<AsyncIOOp> op) {
-  LOG_INFO("KqueueIOEngine::process_read - processing read operation");
   intptr_t fd = op->io_object->native_handle();
+  LOG_INFO("KqueueIOEngine::process_read - processing read operation for fd ",
+           fd);
 
   // 注册读事件到 kqueue
   struct kevent kev;

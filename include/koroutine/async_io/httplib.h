@@ -308,6 +308,7 @@ using socket_t = int;
 #include <unordered_set>
 #include <utility>
 
+#include "koroutine/async_io/op.h"
 #include "koroutine/async_io/socket.h"
 #include "koroutine/debug.h"
 #include "koroutine/runtime.hpp"
@@ -1184,6 +1185,8 @@ class Server {
   void stop();
   void decommission();
 
+  int bind_port() const { return port_; }
+
   std::function<TaskQueue*(void)> new_task_queue;
 
  protected:
@@ -1194,6 +1197,7 @@ class Server {
       const std::function<void(Request&)>& setup_request);
 
   std::atomic<socket_t> svr_sock_{INVALID_SOCKET};
+  std::shared_ptr<koroutine::async_io::AsyncServerSocket> server_socket_;
 
   std::vector<std::string> trusted_proxies_;
 
@@ -1271,6 +1275,7 @@ class Server {
   koroutine::TaskManager task_manager_;
   std::atomic<bool> is_running_{false};
   std::atomic<bool> is_decommissioned{false};
+  int port_ = -1;
 
   struct MountPointEntry {
     std::string mount_point;
@@ -8434,9 +8439,17 @@ inline void Server::stop() {
   if (is_running_) {
     assert(svr_sock_ != INVALID_SOCKET);
     task_manager_.cancel_group("http_connections");
-    std::atomic<socket_t> sock(svr_sock_.exchange(INVALID_SOCKET));
-    detail::shutdown_socket(sock);
-    detail::close_socket(sock);
+
+    if (server_socket_) {
+      auto engine = server_socket_->get_engine();
+      auto op = std::make_shared<koroutine::async_io::AsyncIOOp>(
+          koroutine::async_io::OpType::CLOSE, server_socket_, nullptr, 0);
+      engine->submit(op);
+    } else {
+      std::atomic<socket_t> sock(svr_sock_.exchange(INVALID_SOCKET));
+      detail::shutdown_socket(sock);
+      detail::close_socket(sock);
+    }
 
     {
       std::lock_guard lock(clients_mtx_);
@@ -9017,20 +9030,32 @@ inline bool Server::listen_internal() {
 inline koroutine::Task<bool> Server::listen_async(const std::string& host,
                                                   int port, int socket_flags) {
   LOG_INFO("Server starting listen on ", host, ":", port);
-  auto server_socket = co_await koroutine::async_io::AsyncServerSocket::bind(
-      koroutine::async_io::Endpoint(host, port));
-  if (!server_socket) {
+  try {
+    server_socket_ = co_await koroutine::async_io::AsyncServerSocket::bind(
+        koroutine::async_io::Endpoint(host, port));
+    if (server_socket_) {
+      port_ = server_socket_->local_endpoint().port();
+      LOG_INFO("Server bound to port: ", port_);
+    }
+  } catch (const std::exception& e) {
+    LOG_ERROR("Server failed to bind to ", host, ":", port,
+              " Error: ", e.what());
+    co_return false;
+  }
+
+  if (!server_socket_) {
     LOG_ERROR("Server failed to bind to ", host, ":", port);
     co_return false;
   }
 
-  svr_sock_ = server_socket->native_handle();
+  svr_sock_ = server_socket_->native_handle();
+  port_ = server_socket_->local_endpoint().port();
   is_running_ = true;
-  LOG_INFO("Server listening...");
+  LOG_INFO("Server listening on port: ", port_);
 
   try {
     while (is_running_) {
-      auto client_socket = co_await server_socket->accept();
+      auto client_socket = co_await server_socket_->accept();
       if (!client_socket) {
         LOG_WARN("Server accept failed or stopped");
         break;
@@ -11293,7 +11318,7 @@ inline koroutine::Task<Result> ClientImpl::Post(const std::string& path) {
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 const Headers& headers) {
-  return Post(path, headers, nullptr, 0, std::string());
+  co_return co_await Post(path, headers, nullptr, 0, std::string());
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
@@ -11301,63 +11326,66 @@ inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 size_t content_length,
                                                 const std::string& content_type,
                                                 UploadProgress progress) {
-  return Post(path, Headers(), body, content_length, content_type, progress);
+  co_return co_await Post(path, Headers(), body, content_length, content_type,
+                          progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 const std::string& body,
                                                 const std::string& content_type,
                                                 UploadProgress progress) {
-  return Post(path, Headers(), body, content_type, progress);
+  co_return co_await Post(path, Headers(), body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 const Params& params) {
-  return Post(path, Headers(), params);
+  co_return co_await Post(path, Headers(), params);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     UploadProgress progress) {
-  return Post(path, Headers(), content_length, std::move(content_provider),
-              content_type, progress);
+  co_return co_await Post(path, Headers(), content_length,
+                          std::move(content_provider), content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     ContentReceiver content_receiver, UploadProgress progress) {
-  return Post(path, Headers(), content_length, std::move(content_provider),
-              content_type, std::move(content_receiver), progress);
+  co_return co_await Post(path, Headers(), content_length,
+                          std::move(content_provider), content_type,
+                          std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return Post(path, Headers(), std::move(content_provider), content_type,
-              progress);
+  co_return co_await Post(path, Headers(), std::move(content_provider),
+                          content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     UploadProgress progress) {
-  return Post(path, Headers(), std::move(content_provider), content_type,
-              std::move(content_receiver), progress);
+  co_return co_await Post(path, Headers(), std::move(content_provider),
+                          content_type, std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 const Headers& headers,
                                                 const Params& params) {
   auto query = detail::params_to_query_str(params);
-  return Post(path, headers, query, "application/x-www-form-urlencoded");
+  co_return co_await Post(path, headers, query,
+                          "application/x-www-form-urlencoded");
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, const UploadFormDataItems& items,
     UploadProgress progress) {
-  return Post(path, Headers(), items, progress);
+  co_return co_await Post(path, Headers(), items, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
@@ -11367,7 +11395,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
   const auto& body = detail::serialize_multipart_formdata(items, boundary);
-  return Post(path, headers, body, content_type, progress);
+  co_return co_await Post(path, headers, body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(
@@ -11489,7 +11517,7 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path) {
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const Headers& headers) {
-  return Put(path, headers, nullptr, 0, std::string());
+  co_return co_await Put(path, headers, nullptr, 0, std::string());
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11497,19 +11525,20 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                size_t content_length,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return Put(path, Headers(), body, content_length, content_type, progress);
+  co_return co_await Put(path, Headers(), body, content_length, content_type,
+                         progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const std::string& body,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return Put(path, Headers(), body, content_type, progress);
+  co_return co_await Put(path, Headers(), body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const Params& params) {
-  return Put(path, Headers(), params);
+  co_return co_await Put(path, Headers(), params);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11517,8 +11546,8 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                ContentProvider content_provider,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return Put(path, Headers(), content_length, std::move(content_provider),
-             content_type, progress);
+  co_return co_await Put(path, Headers(), content_length,
+                         std::move(content_provider), content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11527,36 +11556,38 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const std::string& content_type,
                                                ContentReceiver content_receiver,
                                                UploadProgress progress) {
-  return Put(path, Headers(), content_length, std::move(content_provider),
-             content_type, std::move(content_receiver), progress);
+  co_return co_await Put(path, Headers(), content_length,
+                         std::move(content_provider), content_type,
+                         std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return Put(path, Headers(), std::move(content_provider), content_type,
-             progress);
+  co_return co_await Put(path, Headers(), std::move(content_provider),
+                         content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     UploadProgress progress) {
-  return Put(path, Headers(), std::move(content_provider), content_type,
-             std::move(content_receiver), progress);
+  co_return co_await Put(path, Headers(), std::move(content_provider),
+                         content_type, std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const Headers& headers,
                                                const Params& params) {
   auto query = detail::params_to_query_str(params);
-  return Put(path, headers, query, "application/x-www-form-urlencoded");
+  co_return co_await Put(path, headers, query,
+                         "application/x-www-form-urlencoded");
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const UploadFormDataItems& items,
                                                UploadProgress progress) {
-  return Put(path, Headers(), items, progress);
+  co_return co_await Put(path, Headers(), items, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11567,7 +11598,7 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
   const auto& body = detail::serialize_multipart_formdata(items, boundary);
-  return Put(path, headers, body, content_type, progress);
+  co_return co_await Put(path, headers, body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11695,68 +11726,71 @@ inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path) {
 inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path,
                                                  const Headers& headers,
                                                  UploadProgress progress) {
-  return Patch(path, headers, nullptr, 0, std::string(), progress);
+  co_return co_await Patch(path, headers, nullptr, 0, std::string(), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const char* body, size_t content_length,
     const std::string& content_type, UploadProgress progress) {
-  return Patch(path, Headers(), body, content_length, content_type, progress);
+  co_return co_await Patch(path, Headers(), body, content_length, content_type,
+                           progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const std::string& body,
     const std::string& content_type, UploadProgress progress) {
-  return Patch(path, Headers(), body, content_type, progress);
+  co_return co_await Patch(path, Headers(), body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path,
                                                  const Params& params) {
-  return Patch(path, Headers(), params);
+  co_return co_await Patch(path, Headers(), params);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     UploadProgress progress) {
-  return Patch(path, Headers(), content_length, std::move(content_provider),
-               content_type, progress);
+  co_return co_await Patch(path, Headers(), content_length,
+                           std::move(content_provider), content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     ContentReceiver content_receiver, UploadProgress progress) {
-  return Patch(path, Headers(), content_length, std::move(content_provider),
-               content_type, std::move(content_receiver), progress);
+  co_return co_await Patch(path, Headers(), content_length,
+                           std::move(content_provider), content_type,
+                           std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return Patch(path, Headers(), std::move(content_provider), content_type,
-               progress);
+  co_return co_await Patch(path, Headers(), std::move(content_provider),
+                           content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     UploadProgress progress) {
-  return Patch(path, Headers(), std::move(content_provider), content_type,
-               std::move(content_receiver), progress);
+  co_return co_await Patch(path, Headers(), std::move(content_provider),
+                           content_type, std::move(content_receiver), progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path,
                                                  const Headers& headers,
                                                  const Params& params) {
   auto query = detail::params_to_query_str(params);
-  return Patch(path, headers, query, "application/x-www-form-urlencoded");
+  co_return co_await Patch(path, headers, query,
+                           "application/x-www-form-urlencoded");
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const UploadFormDataItems& items,
     UploadProgress progress) {
-  return Patch(path, Headers(), items, progress);
+  co_return co_await Patch(path, Headers(), items, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
@@ -11766,7 +11800,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
   const auto& body = detail::serialize_multipart_formdata(items, boundary);
-  return Patch(path, headers, body, content_type, progress);
+  co_return co_await Patch(path, headers, body, content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(
@@ -11880,13 +11914,15 @@ inline koroutine::Task<Result> ClientImpl::Patch(
 
 inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
                                                   DownloadProgress progress) {
-  return Delete(path, Headers(), std::string(), std::string(), progress);
+  co_return co_await Delete(path, Headers(), std::string(), std::string(),
+                            progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
                                                   const Headers& headers,
                                                   DownloadProgress progress) {
-  return Delete(path, headers, std::string(), std::string(), progress);
+  co_return co_await Delete(path, headers, std::string(), std::string(),
+                            progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(

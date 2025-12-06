@@ -14,7 +14,7 @@ class HttpTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Setup code if needed
-    debug::set_level(debug::Level::Trace);
+    debug::set_level(debug::Level::Warn);
     debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                             debug::Detail::ThreadId | debug::Detail::FileLine);
   }
@@ -62,7 +62,7 @@ TEST_F(HttpTest, BasicGetPost) {
       std::cout << "Inside spawned task lambda" << std::endl;
       try {
         std::cout << "Starting server listen" << std::endl;
-        bool ret = co_await svr->listen_async("127.0.0.1", 8082);
+        bool ret = co_await svr->listen_async("127.0.0.1", port);
         std::cout << "Server listen returned: " << ret << std::endl;
       } catch (const std::exception& e) {
         std::cout << "Server listen threw exception: " << e.what() << std::endl;
@@ -71,13 +71,14 @@ TEST_F(HttpTest, BasicGetPost) {
       }
     };
     koroutine::Runtime::spawn(server_task(svr, port));
+
+    EXPECT_EQ(svr->bind_port(), port);
     std::cout << "Spawned server task" << std::endl;
 
     std::cout << "Waiting for server startup" << std::endl;
     co_await koroutine::SleepAwaiter(100);
 
-    Client cli("http://127.0.0.1:8082");
-    // Client cli("http://localhost:8082");
+    Client cli("http://127.0.0.1:" + std::to_string(port));
 
     // Test GET
     std::cout << "Sending GET /hi" << std::endl;

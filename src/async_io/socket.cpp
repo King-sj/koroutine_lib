@@ -190,16 +190,14 @@ Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(
 }
 
 Task<size_t> AsyncSocket::read(void* buf, size_t size) {
-  // fprintf(stderr, "DEBUG: AsyncSocket::read fd=%ld size=%zu\n",
-  // (long)sockfd_, size);
+  LOG_TRACE("AsyncSocket::read fd=", (long)sockfd_, " size=", size);
   auto io_op =
       std::make_shared<AsyncIOOp>(OpType::READ, shared_from_this(), buf, size);
   co_return co_await IOAwaiter<size_t>{io_op};
 }
 
 Task<size_t> AsyncSocket::write(const void* buf, size_t size) {
-  fprintf(stderr, "DEBUG: AsyncSocket::write fd=%ld size=%zu\n", (long)sockfd_,
-          size);
+  LOG_TRACE("AsyncSocket::write fd=", (long)sockfd_, " size=", size);
   auto io_op = std::make_shared<AsyncIOOp>(OpType::WRITE, shared_from_this(),
                                            const_cast<void*>(buf), size);
   co_return co_await IOAwaiter<size_t>{io_op};

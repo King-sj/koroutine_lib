@@ -30,6 +30,8 @@ class AsyncIOObject {
   // 获取底层句柄(平台相关)
   virtual intptr_t native_handle() const = 0;
 
+  std::shared_ptr<IOEngine> get_engine() const { return engine_; }
+
  protected:
   friend class IOEngine;
 
