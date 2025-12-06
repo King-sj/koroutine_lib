@@ -10775,7 +10775,7 @@ inline koroutine::Task<bool> ClientImpl::write_request(Stream& strm,
 
     // Write request line and headers
     co_await detail::write_request_line(bstrm, req.method, path_with_query);
-    header_writer_(bstrm, req.headers);
+    co_await header_writer_(bstrm, req.headers);
 
     // Flush buffer
     auto& data = bstrm.get_buffer();
@@ -11140,7 +11140,7 @@ inline bool ClientImpl::is_ssl() const { return false; }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                DownloadProgress progress) {
-  return Get(path, Headers(), std::move(progress));
+  co_return co_await Get(path, Headers(), std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
