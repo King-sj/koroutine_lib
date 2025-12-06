@@ -43,7 +43,9 @@ class LooperExecutor : public AbstractExecutor {
 
       if (tasks_.empty() && delayed_tasks_.empty()) {
         LOG_INFO("LooperExecutor::run_loop - no tasks available, waiting...");
-        cv_.wait(lock);
+        cv_.wait(lock, [this] {
+          return !tasks_.empty() || !delayed_tasks_.empty() || !is_active_;
+        });
         if (!is_active_ && tasks_.empty() && delayed_tasks_.empty()) break;
       }
 
@@ -54,7 +56,8 @@ class LooperExecutor : public AbstractExecutor {
               "LooperExecutor::run_loop - waiting for delayed task to be "
               "ready");
           //   TODO: 如果在等待期间有新任务到来，应该提前唤醒
-          cv_.wait_for(lock, wait_time);
+          cv_.wait_for(lock, wait_time,
+                       [this] { return !tasks_.empty() || !is_active_; });
         }
       }
 
@@ -120,7 +123,10 @@ class LooperExecutor : public AbstractExecutor {
 
   void shutdown() {
     LOG_TRACE("LooperExecutor::shutdown - shutting down executor");
-    is_active_ = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      is_active_ = false;
+    }
     cv_.notify_all();
   }
 

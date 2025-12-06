@@ -252,7 +252,13 @@ void KqueueIOEngine::process_close(std::shared_ptr<AsyncIOOp> op) {
   }
 
   // 从 active_ops_ 中移除
-  active_ops_.erase(fd);
+  auto it = active_ops_.find(fd);
+  if (it != active_ops_.end()) {
+    auto pending_op = it->second;
+    pending_op->error = std::make_error_code(std::errc::operation_canceled);
+    complete(pending_op);
+    active_ops_.erase(it);
+  }
 
   // 完成操作
   complete(op);

@@ -123,24 +123,30 @@ TEST_F(HttpTest, LargeHeaders) {
 
     co_await koroutine::SleepAwaiter(100);
 
-    Client cli("http://127.0.0.1:8083");
+    {
+      Client cli("http://127.0.0.1:8083");
 
-    Headers headers;
-    for (int i = 0; i < 50; ++i) {
-      headers.emplace("X-Custom-Header-" + std::to_string(i),
-                      random_string(100));
+      Headers headers;
+      for (int i = 0; i < 50; ++i) {
+        headers.emplace("X-Custom-Header-" + std::to_string(i),
+                        random_string(100));
+      }
+
+      auto res = co_await cli.Get("/large-header", headers);
+      EXPECT_TRUE(res);
+      if (res) {
+        EXPECT_EQ(res->status, 200);
+      }
     }
 
-    auto res = co_await cli.Get("/large-header", headers);
-    EXPECT_TRUE(res);
-    if (res) {
-      EXPECT_EQ(res->status, 200);
-    }
-
+    std::cout << "Calling svr->stop()" << std::endl;
     svr->stop();
+    std::cout << "svr->stop() returned" << std::endl;
+    std::cout << "test_task finishing" << std::endl;
   };
 
   Runtime::block_on(test_task());
+  std::cout << "Runtime::block_on returned" << std::endl;
 }
 
 TEST_F(HttpTest, NotFound) {

@@ -93,6 +93,9 @@ static ResultType block_on(Task<ResultType>&& task) {
   // (like lock_guard) even after notifying the CV. We must ensure it is fully
   // suspended before we return and destroy the task handle.
   while (!wrapper_task.is_done()) {
+    LOG_WARN(
+        "Runtime::block_on - waiting for wrapper task to reach final "
+        "suspend");
     lock.unlock();
     std::this_thread::yield();
     lock.lock();

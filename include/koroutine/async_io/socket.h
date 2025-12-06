@@ -33,6 +33,7 @@ class AsyncSocket : public AsyncIOObject,
   Task<size_t> read(void* buf, size_t size) override;
   Task<size_t> write(const void* buf, size_t size) override;
   Task<void> close() override;
+  void cancel();
 
   intptr_t native_handle() const override { return sockfd_; }
 
@@ -86,6 +87,7 @@ class AsyncSocket : public AsyncIOObject,
 
  private:
   intptr_t sockfd_;
+  bool is_closed_ = false;
 };
 
 class AsyncServerSocket

@@ -1208,6 +1208,9 @@ class Server {
   size_t payload_max_length_ = CPPHTTPLIB_PAYLOAD_MAX_LENGTH;
 
  private:
+  std::mutex clients_mtx_;
+  std::vector<std::weak_ptr<koroutine::async_io::AsyncSocket>> clients_;
+
   using Handlers =
       std::vector<std::pair<std::unique_ptr<detail::MatcherBase>, Handler>>;
   using HandlersForContentReader =
@@ -4577,8 +4580,7 @@ socket_t create_socket(const std::string& host, const std::string& ip, int port,
 
   if (getaddrinfo_with_timeout(node, service.c_str(), &hints, &result,
                                timeout_sec)) {
-    std::cout << "DEBUG: getaddrinfo failed for " << (node ? node : "null")
-              << ":" << service << std::endl;
+    LOG_DEBUG("getaddrinfo failed for {}:{}", (node ? node : "null"), service);
 #if defined __linux__ && !defined __ANDROID__
     res_init();
 #endif
@@ -4587,7 +4589,7 @@ socket_t create_socket(const std::string& host, const std::string& ip, int port,
   auto se = detail::scope_exit([&] { freeaddrinfo(result); });
 
   for (auto rp = result; rp; rp = rp->ai_next) {
-    std::cout << "DEBUG: trying addrinfo family=" << rp->ai_family << std::endl;
+    LOG_DEBUG("trying addrinfo family={}", rp->ai_family);
     // Create a socket
 #ifdef _WIN32
     auto sock =
@@ -4646,10 +4648,10 @@ socket_t create_socket(const std::string& host, const std::string& ip, int port,
     // bind or connect
     auto quit = false;
     if (bind_or_connect(sock, *rp, quit)) {
-      std::cout << "DEBUG: bind_or_connect success" << std::endl;
+      LOG_DEBUG("bind_or_connect success");
       return sock;
     }
-    std::cout << "DEBUG: bind_or_connect failed" << std::endl;
+    LOG_DEBUG("bind_or_connect failed");
 
     close_socket(sock);
 
@@ -8435,6 +8437,16 @@ inline void Server::stop() {
     std::atomic<socket_t> sock(svr_sock_.exchange(INVALID_SOCKET));
     detail::shutdown_socket(sock);
     detail::close_socket(sock);
+
+    {
+      std::lock_guard lock(clients_mtx_);
+      for (auto& weak_client : clients_) {
+        if (auto client = weak_client.lock()) {
+          client->cancel();
+        }
+      }
+      clients_.clear();
+    }
   }
   is_decommissioned = false;
 }
@@ -9012,49 +9024,62 @@ inline koroutine::Task<bool> Server::listen_async(const std::string& host,
     co_return false;
   }
 
+  svr_sock_ = server_socket->native_handle();
   is_running_ = true;
   LOG_INFO("Server listening...");
 
-  while (is_running_) {
-    auto client_socket = co_await server_socket->accept();
-    if (!client_socket) {
-      LOG_WARN("Server accept failed or stopped");
-      break;
-    }
-    LOG_ERROR("Accepted new connection");
-
-    auto task = [](Server* self,
-                   std::shared_ptr<koroutine::async_io::AsyncSocket> client)
-        -> koroutine::Task<void> {
-      detail::SocketStream socket_strm(client);
-      detail::BufferedStream strm(socket_strm);
-      bool connection_closed = false;
-      while (!connection_closed) {
-        std::string remote_addr;
-        int remote_port;
-        strm.get_remote_ip_and_port(remote_addr, remote_port);
-        std::string local_addr;
-        int local_port;
-        strm.get_local_ip_and_port(local_addr, local_port);
-
-        LOG_DEBUG("New connection from ", remote_addr, ":", remote_port);
-
-        bool close_conn = false;
-        bool ret = co_await self->process_request(
-            strm, remote_addr, remote_port, local_addr, local_port, close_conn,
-            connection_closed, nullptr);
-        if (!ret || connection_closed) break;
+  try {
+    while (is_running_) {
+      auto client_socket = co_await server_socket->accept();
+      if (!client_socket) {
+        LOG_WARN("Server accept failed or stopped");
+        break;
       }
-      co_await client->close();
-    }(this, std::move(client_socket));
+      LOG_ERROR("Accepted new connection");
 
-    task_manager_.submit_to_group(
-        "http_connections",
-        std::make_shared<koroutine::Task<void>>(std::move(task)));
+      {
+        std::lock_guard lock(clients_mtx_);
+        clients_.push_back(client_socket);
+      }
+
+      auto task = [](Server* self,
+                     std::shared_ptr<koroutine::async_io::AsyncSocket> client)
+          -> koroutine::Task<void> {
+        detail::SocketStream socket_strm(client);
+        detail::BufferedStream strm(socket_strm);
+        bool connection_closed = false;
+        while (!connection_closed) {
+          std::string remote_addr;
+          int remote_port;
+          strm.get_remote_ip_and_port(remote_addr, remote_port);
+          std::string local_addr;
+          int local_port;
+          strm.get_local_ip_and_port(local_addr, local_port);
+
+          LOG_DEBUG("New connection from ", remote_addr, ":", remote_port);
+
+          bool close_conn = false;
+          bool ret = co_await self->process_request(
+              strm, remote_addr, remote_port, local_addr, local_port,
+              close_conn, connection_closed, nullptr);
+          if (!ret || connection_closed) break;
+        }
+        co_await client->close();
+      }(this, std::move(client_socket));
+
+      task_manager_.submit_to_group(
+          "http_connections",
+          std::make_shared<koroutine::Task<void>>(std::move(task)));
+    }
+  } catch (const std::exception& e) {
+    LOG_WARN("Server listen loop interrupted by exception: ", e.what());
+  } catch (...) {
+    LOG_WARN("Server listen loop interrupted by unknown exception");
   }
   LOG_INFO("Server stopping...");
   co_await task_manager_.shutdown();
   LOG_INFO("Server stopped");
+  is_running_ = false;
   co_return true;
 }
 
@@ -9720,17 +9745,17 @@ inline socket_t ClientImpl::create_client_socket(Error& error) const {
 
 inline bool ClientImpl::create_and_connect_socket(Socket& socket,
                                                   Error& error) {
-  std::cout << "DEBUG: create_and_connect_socket start" << std::endl;
+  LOG_DEBUG("create_and_connect_socket start");
   auto raw_sock = create_client_socket(error);
   if (raw_sock == INVALID_SOCKET) {
-    std::cout << "DEBUG: create_client_socket failed" << std::endl;
+    LOG_DEBUG("create_client_socket failed");
     return false;
   }
-  std::cout << "DEBUG: create_client_socket success: " << raw_sock << std::endl;
+  LOG_DEBUG("create_client_socket success: {}", raw_sock);
   detail::set_nonblocking(raw_sock, true);
   socket.sock = std::make_shared<koroutine::async_io::AsyncSocket>(
       koroutine::async_io::get_default_io_engine(), raw_sock);
-  std::cout << "DEBUG: AsyncSocket created" << std::endl;
+  LOG_DEBUG("AsyncSocket created");
   return true;
 }
 
@@ -9841,10 +9866,9 @@ inline koroutine::Task<bool> ClientImpl::read_response_line(
 inline koroutine::Task<bool> ClientImpl::send(Request& req, Response& res,
                                               Error& error) {
   // std::lock_guard<std::recursive_mutex> request_mutex_guard(request_mutex_);
-  std::cout << "DEBUG: ClientImpl::send (private) start" << std::endl;
+  LOG_DEBUG("ClientImpl::send (private) start");
   auto ret = co_await send_(req, res, error);
-  std::cout << "DEBUG: ClientImpl::send (private) send_ returned: " << ret
-            << std::endl;
+  LOG_DEBUG("ClientImpl::send (private) send_ returned: {}", ret);
   if (error == Error::SSLPeerCouldBeClosed_) {
     assert(!ret);
     ret = co_await send_(req, res, error);
@@ -9889,9 +9913,9 @@ inline koroutine::Task<bool> ClientImpl::send_(Request& req, Response& res,
 
     if (!is_alive) {
       if (!ensure_socket_connection(socket_, error)) {
-        std::cout << "DEBUG: ensure_socket_connection failed" << std::endl;
+        LOG_DEBUG("ensure_socket_connection failed");
         output_error_log(error, &req);
-        std::cout << "DEBUG: output_error_log done" << std::endl;
+        LOG_DEBUG("output_error_log done");
         co_return false;
       }
 
@@ -9978,9 +10002,11 @@ inline koroutine::Task<Result> ClientImpl::send(const Request& req) {
 }
 
 inline koroutine::Task<Result> ClientImpl::send_(Request req) {
+  LOG_DEBUG("ClientImpl::send_ (wrapper) start");
   auto res = detail::make_unique<Response>();
   auto error = Error::Success;
   auto ret = co_await send(req, *res, error);
+  LOG_DEBUG("ClientImpl::send_ (wrapper) send returned: {}", ret);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   co_return Result{ret ? std::move(res) : nullptr, error,
                    std::move(req.headers), last_ssl_error_,
@@ -11158,6 +11184,7 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                const Headers& headers,
                                                DownloadProgress progress) {
+  LOG_DEBUG("ClientImpl::Get start");
   Request req;
   req.method = "GET";
   req.path = path;
@@ -11167,7 +11194,9 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
     req.start_time_ = std::chrono::steady_clock::now();
   }
 
-  co_return co_await send_(std::move(req));
+  auto res = co_await send_(std::move(req));
+  LOG_DEBUG("ClientImpl::Get send_ returned");
+  co_return res;
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,

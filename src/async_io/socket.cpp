@@ -52,10 +52,9 @@ AsyncSocket::AsyncSocket(std::shared_ptr<IOEngine> engine, intptr_t sockfd)
     : AsyncIOObject(engine), sockfd_(sockfd) {}
 
 AsyncSocket::~AsyncSocket() {
-  // We don't automatically close in destructor because it might be shared or
-  // closed asynchronously. But usually RAII suggests we should. However,
-  // AsyncIOObject might have different lifecycle. For now, follow existing
-  // pattern (user calls close()).
+  if (!is_closed_ && sockfd_ != -1) {
+    close_socket(sockfd_);
+  }
 }
 
 Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(Endpoint endpoint) {
@@ -207,9 +206,19 @@ Task<size_t> AsyncSocket::write(const void* buf, size_t size) {
 }
 
 Task<void> AsyncSocket::close() {
+  if (is_closed_) co_return;
+  is_closed_ = true;
   auto io_op = std::make_shared<AsyncIOOp>(OpType::CLOSE, shared_from_this(),
                                            nullptr, 0);
   co_await IOAwaiter<void>{io_op};
+}
+
+void AsyncSocket::cancel() {
+  if (is_closed_) return;
+  is_closed_ = true;
+  auto io_op = std::make_shared<AsyncIOOp>(OpType::CLOSE, shared_from_this(),
+                                           nullptr, 0);
+  engine_->submit(io_op);
 }
 
 Endpoint AsyncSocket::local_endpoint() const {
