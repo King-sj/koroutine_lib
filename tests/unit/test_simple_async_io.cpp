@@ -24,7 +24,7 @@ TEST(SimpleAsyncIOTest, ImplicitEngineFileWriteRead) {
   TempFile temp("test_simple_io.txt");
   const std::string test_content = "Simple Async IO Test";
 
-  auto test_task = [&]() -> Task<void> {
+  auto test_lambda = [&]() -> Task<void> {
     // Write
     {
       auto file = co_await AsyncFile::open(temp.name(),
@@ -44,7 +44,8 @@ TEST(SimpleAsyncIOTest, ImplicitEngineFileWriteRead) {
       EXPECT_EQ(std::string(buffer), test_content);
       co_await file->close();
     }
-  }();
+  };
+  auto test_task = test_lambda();
 
   Runtime::block_on(std::move(test_task));
 }

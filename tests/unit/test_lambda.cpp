@@ -11,6 +11,19 @@ using namespace koroutine;
 // use-after-free because the lambda object is destroyed before the task
 // executes.
 TEST(LambdaTest, CaptureLifetimeError) {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+  // In an ASan build, this test will crash due to use-after-free.
+  // We cannot verify "garbage value" because ASan aborts the process.
+  // We also cannot easily use EXPECT_DEATH because the library starts global
+  // threads (SimpleScheduler), making fork() unsafe.
+  GTEST_SKIP() << "Skipping test in ASan build: cannot verify garbage value "
+                  "(ASan crashes) and cannot use EXPECT_DEATH (unsafe with "
+                  "global threads).";
+  return;
+#endif
+#endif
+
   auto task = [str = std::string("Hello World Long String To Avoid SSO")]()
       -> Task<std::string> {
     // 'str' is a member of the lambda closure.
