@@ -87,6 +87,20 @@ static ResultType block_on(Task<ResultType>&& task) {
   LOG_TRACE("Runtime::block_on - waiting for task to complete");
   std::unique_lock lock(mtx);
   cv.wait(lock, [&is_completed]() { return is_completed.load(); });
+
+  // Wait for the wrapper coroutine to reach final suspend to avoid
+  // use-after-free The coroutine might still be running destructors of locals
+  // (like lock_guard) even after notifying the CV. We must ensure it is fully
+  // suspended before we return and destroy the task handle.
+  while (!wrapper_task.is_done()) {
+    LOG_WARN(
+        "Runtime::block_on - waiting for wrapper task to reach final "
+        "suspend");
+    lock.unlock();
+    std::this_thread::yield();
+    lock.lock();
+  }
+
   if (exception_ptr) {
     LOG_TRACE("Runtime::block_on - rethrowing exception from task");
     std::rethrow_exception(exception_ptr);
@@ -218,6 +232,12 @@ static void join_all(std::vector<TaskType> tasks) {
   if (!exceptions.empty()) {
     throw AggregateException(std::move(exceptions));
   }
+}
+
+template <typename T>
+static void spawn(Task<T>&& task) {
+  task.start();
+  task.detach();
 }
 
 };  // namespace Runtime

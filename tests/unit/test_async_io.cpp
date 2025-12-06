@@ -30,13 +30,14 @@ TEST(AsyncIOTest, BasicFileOpenClose) {
   TempFile temp("test_open_close.txt");
   auto engine = IOEngine::create();
 
-  auto test_task = [&]() -> Task<void> {
+  auto test_lambda = [&]() -> Task<void> {
     auto file = co_await AsyncFile::open(engine, temp.name(),
                                          std::ios::out | std::ios::trunc);
     EXPECT_NE(file, nullptr);
     co_await file->close();
     engine->stop();
-  }();
+  };
+  auto test_task = test_lambda();
 
   std::thread io_thread([&engine]() { engine->run(); });
 
@@ -51,7 +52,7 @@ TEST(AsyncIOTest, FileWrite) {
   const std::string test_content = "Hello, AsyncIO!";
   auto engine = IOEngine::create();
 
-  auto test_task = [&]() -> Task<void> {
+  auto test_lambda = [&]() -> Task<void> {
     auto file = co_await AsyncFile::open(engine, temp.name(),
                                          std::ios::out | std::ios::trunc);
     EXPECT_NE(file, nullptr);
@@ -60,7 +61,8 @@ TEST(AsyncIOTest, FileWrite) {
     co_await file->flush();
     co_await file->close();
     engine->stop();
-  }();
+  };
+  auto test_task = test_lambda();
 
   std::thread io_thread([&engine]() { engine->run(); });
 
@@ -88,7 +90,7 @@ TEST(AsyncIOTest, FileRead) {
 
   auto engine = IOEngine::create();
 
-  auto test_task = [&]() -> Task<std::string> {
+  auto test_lambda = [&]() -> Task<std::string> {
     auto file = co_await AsyncFile::open(engine, temp.name(), std::ios::in);
     EXPECT_NE(file, nullptr);
 
@@ -99,7 +101,8 @@ TEST(AsyncIOTest, FileRead) {
     engine->stop();
 
     co_return std::string(buffer);
-  }();
+  };
+  auto test_task = test_lambda();
 
   std::thread io_thread([&engine]() { engine->run(); });
 
@@ -116,7 +119,7 @@ TEST(AsyncIOTest, WriteAndRead) {
   const std::string test_content = "Write and read test!";
   auto engine = IOEngine::create();
 
-  auto test_task = [&]() -> Task<std::string> {
+  auto test_lambda = [&]() -> Task<std::string> {
     // 写入
     {
       auto file = co_await AsyncFile::open(engine, temp.name(),
@@ -140,7 +143,8 @@ TEST(AsyncIOTest, WriteAndRead) {
 
       co_return std::string(buffer);
     }
-  }();
+  };
+  auto test_task = test_lambda();
 
   std::thread io_thread([&engine]() { engine->run(); });
 
@@ -161,7 +165,7 @@ TEST(AsyncIOTest, SynchronizedWriteAndRead) {
   AsyncConditionVariable completed;
   bool write_completed = false;
 
-  auto write_task = [&]() -> Task<void> {
+  auto write_lambda = [&]() -> Task<void> {
     co_await io_mutex.lock();
     auto file = co_await AsyncFile::open(engine, temp.name(),
                                          std::ios::out | std::ios::trunc);
@@ -172,9 +176,10 @@ TEST(AsyncIOTest, SynchronizedWriteAndRead) {
     write_completed = true;
     io_mutex.unlock();
     completed.notify_all();
-  }();
+  };
+  auto write_task = write_lambda();
 
-  auto read_task = [&]() -> Task<std::string> {
+  auto read_lambda = [&]() -> Task<std::string> {
     co_await io_mutex.lock();
     while (!write_completed) {
       co_await completed.wait(io_mutex);
@@ -189,7 +194,8 @@ TEST(AsyncIOTest, SynchronizedWriteAndRead) {
     engine->stop();
 
     co_return std::string(buffer);
-  }();
+  };
+  auto read_task = read_lambda();
 
   std::thread io_thread([&engine]() { engine->run(); });
 

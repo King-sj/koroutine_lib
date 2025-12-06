@@ -147,3 +147,7 @@ cd build && ctest -V
 ## 许可证
 
 本项目采用 [MPL License](LICENSE)。
+
+## 致谢
+
+- HTTP 模块基于 [cpp-httplib](https://github.com/yhirose/cpp-httplib) 修改而来，感谢原作者 yhirose 的出色工作。

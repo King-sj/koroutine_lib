@@ -31,7 +31,7 @@ class AsyncMutex {
         owns_mutex_on_resume = true;
         lk.unlock();
         // resume the awaiting coroutine immediately
-        this->resume_unsafe();
+        this->resume();
         return;
       }
       // otherwise enqueue

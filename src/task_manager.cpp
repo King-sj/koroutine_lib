@@ -46,8 +46,8 @@ Task<void> TaskManager::join_group(std::string name) {
     while (true) {
       // Build a list of active tasks without holding the lock while awaiting
       // Debug print
-      std::cout << "join_group - scanning groups (" << self->groups_.size()
-                << ") for name: '" << groupName << "'\n";
+      LOG_TRACE("TaskManager::join_group - scanning groups for name: ",
+                groupName);
       std::vector<std::weak_ptr<Task<void>>> active;
       {
         std::lock_guard lock(self->mtx_);

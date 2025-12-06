@@ -8,3 +8,7 @@
 
 - **如果你是新用户**，请从 **[核心设计](./design.md)** 开始，了解库的基本架构。
 - **如果你想立刻开始编码**，请访问 **[使用指南](./guides/01-getting-started.md)**。
+
+## 致谢
+
+`koroutine_lib` 的 HTTP 模块深度集成了 [cpp-httplib](https://github.com/yhirose/cpp-httplib) 项目。我们对其进行了协程化改造，使其能够无缝运行在 `koroutine_lib` 的异步 I/O 框架之上。感谢原作者 yhirose 提供的优秀基础。

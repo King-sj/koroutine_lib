@@ -20,6 +20,9 @@
 - `async_io` — `include/koroutine/async_io/` (工厂：`async_io/async_io.hpp`)
   - 跨平台异步 IO 抽象（`AsyncFile`, `AsyncSocket` 等），根据平台选择不同引擎（`io_uring`, `kqueue`, `IOCP`）。
 
+- `HTTP` — `include/koroutine/async_io/httplib.h`
+  - 高性能异步 HTTP Server 和 Client。详见 [HTTP 模块](./http.md)。
+
 - `Runtime` — `include/koroutine/runtime.hpp`
   - 同步运行协程的入口：`Runtime::block_on`, `Runtime::join_all` 等。
 

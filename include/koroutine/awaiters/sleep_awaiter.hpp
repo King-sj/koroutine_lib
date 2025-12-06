@@ -35,6 +35,8 @@ struct SleepAwaiter : public AwaiterBase<void> {
     }
   }
 
+  void before_resume() override { this->_result = Result<void>(); }
+
  private:
   long long _duration;
 };

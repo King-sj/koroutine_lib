@@ -22,21 +22,23 @@ TEST(SyncTest, SyncTest_BasicConditionVariable_Test) {
 
   bool notified = false;
 
-  auto waiter = [&]() -> Task<void> {
+  auto waiter_lambda = [&]() -> Task<void> {
     co_await mtx.lock();
     while (!notified) {
       co_await cv.wait(mtx);
     }
     mtx.unlock();
-  }();
+  };
+  auto waiter = waiter_lambda();
 
-  auto notifier = [&]() -> Task<void> {
+  auto notifier_lambda = [&]() -> Task<void> {
     co_await sleep_for(100);  // ensure waiter is waiting
     co_await mtx.lock();
     notified = true;
     cv.notify_one();
     mtx.unlock();
-  }();
+  };
+  auto notifier = notifier_lambda();
 
   Runtime::join_all(std::move(waiter), std::move(notifier));
 
@@ -48,7 +50,7 @@ TEST(SyncTest, AsyncMutexLocking) {
   int counter = 0;
   const int increments = 200;
 
-  auto t1 = [&]() -> Task<void> {
+  auto t1_lambda = [&]() -> Task<void> {
     for (int i = 0; i < increments; ++i) {
       co_await mtx.lock();
       int tmp = counter;
@@ -56,9 +58,10 @@ TEST(SyncTest, AsyncMutexLocking) {
       counter = tmp + 1;
       mtx.unlock();
     }
-  }();
+  };
+  auto t1 = t1_lambda();
 
-  auto t2 = [&]() -> Task<void> {
+  auto t2_lambda = [&]() -> Task<void> {
     for (int i = 0; i < increments; ++i) {
       co_await mtx.lock();
       int tmp = counter;
@@ -66,7 +69,8 @@ TEST(SyncTest, AsyncMutexLocking) {
       counter = tmp + 1;
       mtx.unlock();
     }
-  }();
+  };
+  auto t2 = t2_lambda();
 
   Runtime::join_all(std::move(t1), std::move(t2));
 
@@ -78,7 +82,7 @@ TEST(SyncTest, ConditionVariableNotifyOne) {
   AsyncConditionVariable cv;
   int shared = 0;
 
-  auto waiter = [&]() -> Task<void> {
+  auto waiter_lambda = [&]() -> Task<void> {
     co_await mtx.lock();
     while (shared == 0) {
       co_await cv.wait(mtx);
@@ -86,16 +90,18 @@ TEST(SyncTest, ConditionVariableNotifyOne) {
     // at this point, waiter should own the mutex
     shared += 1;
     mtx.unlock();
-  }();
+  };
+  auto waiter = waiter_lambda();
 
-  auto notifier = [&]() -> Task<void> {
+  auto notifier_lambda = [&]() -> Task<void> {
     // give waiter a chance to start and wait
     co_await sleep_for(10);
     co_await mtx.lock();
     shared = 1;
     cv.notify_one();
     mtx.unlock();
-  }();
+  };
+  auto notifier = notifier_lambda();
 
   Runtime::join_all(std::move(waiter), std::move(notifier));
 

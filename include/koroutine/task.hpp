@@ -55,6 +55,13 @@ class TaskBase {
     return *this;
   }
 
+  void detach() {
+    if (handle_) {
+      handle_.promise().set_detached(true);
+      handle_ = nullptr;
+    }
+  }
+
   /**
    * @brief 捕获异常并处理，返回新的 Task
    * @param func 异常处理函数
@@ -205,7 +212,7 @@ class Task : public TaskBase<ResultType, Task<ResultType>> {
   auto then(Func&& func) &&;
 
  protected:
-  friend class TaskAwaiter<ResultType>;
+  friend struct TaskAwaiter<ResultType>;
   // blocking for result or throw on exception
   ResultType get_result() {
     LOG_TRACE("Task::get_result - getting result from promise");

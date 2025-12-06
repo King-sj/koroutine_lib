@@ -44,10 +44,11 @@ TEST(SchedulerTest, ScheduleCoroutineHandle) {
   auto scheduler = std::make_shared<SimpleScheduler>();
   std::atomic<bool> resumed{false};
 
-  auto task = [&]() -> Task<void> {
+  auto task_lambda = [&]() -> Task<void> {
     resumed = true;
     co_return;
-  }();
+  };
+  auto task = task_lambda();
 
   ScheduleRequest req(
       task.handle_,
@@ -64,10 +65,11 @@ TEST(SchedulerTest, ScheduleWithDelay) {
   auto start_time = std::chrono::steady_clock::now();
   std::atomic<bool> executed{false};
 
-  auto task = [&]() -> Task<void> {
+  auto task_lambda = [&]() -> Task<void> {
     executed = true;
     co_return;
-  }();
+  };
+  auto task = task_lambda();
 
   scheduler->schedule(ScheduleRequest(task.handle_), 100);  // 100ms 延迟
 
