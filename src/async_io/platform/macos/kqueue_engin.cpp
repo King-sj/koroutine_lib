@@ -16,12 +16,24 @@
 
 namespace koroutine::async_io {
 
+// 定义唤醒事件的 ID
+constexpr uintptr_t WAKEUP_EVENT_ID = 1;
+
 KqueueIOEngine::KqueueIOEngine() : running_(false) {
   // 创建 kqueue 文件描述符
   kqueue_fd_ = kqueue();
   if (kqueue_fd_ == -1) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to create kqueue");
+  }
+
+  // 注册唤醒事件 (EVFILT_USER)
+  // EV_CLEAR: 事件触发后自动复位，适合用于唤醒信号
+  struct kevent kev;
+  EV_SET(&kev, WAKEUP_EVENT_ID, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+  if (kevent(kqueue_fd_, &kev, 1, nullptr, 0, nullptr) == -1) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to register wakeup event");
   }
 }
 
@@ -37,9 +49,16 @@ KqueueIOEngine::~KqueueIOEngine() {
 void KqueueIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
   LOG_TRACE("KqueueIOEngine::submit - submitting IO operation of type ",
             static_cast<int>(op->type));
-  std::lock_guard<std::mutex> lock(ops_mutex_);
-  LOG_TRACE("KqueueIOEngine::submit - operation queued");
-  pending_ops_.push(op);
+  {
+    std::lock_guard<std::mutex> lock(ops_mutex_);
+    LOG_TRACE("KqueueIOEngine::submit - operation queued");
+    pending_ops_.push(op);
+  }
+
+  // 触发唤醒事件，通知 run 循环有新任务
+  struct kevent kev;
+  EV_SET(&kev, WAKEUP_EVENT_ID, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+  kevent(kqueue_fd_, &kev, 1, nullptr, 0, nullptr);
 }
 
 void KqueueIOEngine::run() {
@@ -81,12 +100,10 @@ void KqueueIOEngine::run() {
       }
     }
 
-    // 等待 kqueue 事件，超时时间 100ms
-    struct timespec timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 100'000'000;  // 100ms
-
-    int nev = kevent(kqueue_fd_, nullptr, 0, events, MAX_EVENTS, &timeout);
+    // 等待 kqueue 事件
+    // 使用 nullptr 作为 timeout，表示无限等待，直到有 IO 事件或被唤醒事件触发
+    // 这样避免了 CPU 空转和固定超时带来的延迟
+    int nev = kevent(kqueue_fd_, nullptr, 0, events, MAX_EVENTS, nullptr);
 
     if (nev < 0) {
       if (errno == EINTR) {
@@ -102,6 +119,14 @@ void KqueueIOEngine::run() {
     LOG_TRACE("KqueueIOEngine::run - processing event ", nev);
     for (int i = 0; i < nev; ++i) {
       auto& event = events[i];
+
+      // 检查是否是唤醒事件
+      if (event.filter == EVFILT_USER && event.ident == WAKEUP_EVENT_ID) {
+        LOG_TRACE("KqueueIOEngine::run - wakeup event received");
+        // 唤醒事件，只需要继续循环即可处理 pending_ops_ 或检查 running_
+        continue;
+      }
+
       intptr_t fd = static_cast<intptr_t>(event.ident);
 
       auto it = active_ops_.find(fd);
@@ -196,6 +221,11 @@ void KqueueIOEngine::run() {
 void KqueueIOEngine::stop() {
   LOG_INFO("KqueueIOEngine::stop - stopping event loop");
   running_.store(false);
+
+  // 触发唤醒事件，确保 run 循环能从 kevent 等待中退出并检查 running_ 状态
+  struct kevent kev;
+  EV_SET(&kev, WAKEUP_EVENT_ID, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+  kevent(kqueue_fd_, &kev, 1, nullptr, 0, nullptr);
 }
 
 bool KqueueIOEngine::is_running() { return running_.load(); }
