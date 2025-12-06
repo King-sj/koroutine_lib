@@ -136,4 +136,70 @@ int main() {
 }
 ```
 
+## 4. HTTP 服务器与客户端: `httplib`
+
+基于 `AsyncSocket`，我们提供了一个功能强大的 HTTP 模块（魔改自 `cpp-httplib`）。
+
+### HTTP 服务器
+
+创建一个高性能的异步 HTTP 服务器非常简单：
+
+```cpp
+#include "koroutine/async_io/httplib.h"
+#include "koroutine/koroutine.h"
+
+using namespace koroutine;
+using namespace httplib;
+
+Task<void> run_server() {
+  auto svr = std::make_shared<Server>();
+
+  // 定义路由
+  svr->Get("/hi", [](const Request& req, Response& res) -> Task<void> {
+    res.set_content("Hello World!", "text/plain");
+    co_return;
+  });
+
+  std::cout << "Server listening on http://localhost:8080" << std::endl;
+
+  // 异步监听
+  // listen_async 会一直运行直到服务器停止
+  bool ret = co_await svr->listen_async("0.0.0.0", 8080);
+
+  if (!ret) {
+    std::cerr << "Failed to listen" << std::endl;
+  }
+}
+
+int main() {
+  Runtime::block_on(run_server());
+  return 0;
+}
+```
+
+### HTTP 客户端
+
+同样，你也可以轻松发起 HTTP 请求：
+
+```cpp
+#include "koroutine/async_io/httplib.h"
+#include "koroutine/koroutine.h"
+
+using namespace koroutine;
+using namespace httplib;
+
+Task<void> run_client() {
+    Client cli("http://localhost:8080");
+
+    // 异步发送 GET 请求
+    auto res = co_await cli.Get("/hi");
+
+    if (res && res->status == 200) {
+        std::cout << "Response: " << res->body << std::endl;
+    } else {
+        std::cout << "Request failed" << std::endl;
+    }
+}
+```
+
 通过 `async_io` 模块，你可以用同步风格的代码编写出高性能的、完全非阻塞的 I/O 密集型应用程序，例如网络爬虫、HTTP 服务器、数据库代理等。

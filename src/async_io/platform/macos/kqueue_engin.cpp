@@ -52,6 +52,8 @@ void KqueueIOEngine::run() {
     // 处理待提交的操作
     {
       LOG_TRACE("KqueueIOEngine::run - processing pending operations");
+      //   TODO: 细化 ops_mutex_ 的锁粒度，避免阻塞过久
+      // 操作完 pending_ops_ 后立即释放锁
       std::lock_guard<std::mutex> lock(ops_mutex_);
       while (!pending_ops_.empty()) {
         auto op = pending_ops_.front();

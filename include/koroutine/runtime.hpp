@@ -220,6 +220,12 @@ static void join_all(std::vector<TaskType> tasks) {
   }
 }
 
+template <typename T>
+static void spawn(Task<T>&& task) {
+  task.start();
+  task.detach();
+}
+
 };  // namespace Runtime
 
 /**

@@ -30,11 +30,30 @@ struct TaskPromiseBase {
     return std::suspend_always{};
   }
 
+  struct FinalAwaiter {
+    bool detached;
+    bool await_ready() const noexcept { return detached; }
+    void await_suspend(std::coroutine_handle<>) const noexcept {}
+    void await_resume() const noexcept {}
+  };
+
   auto final_suspend() noexcept {
     // 在 ~task 中 调用 handle_.destroy()
     LOG_TRACE("TaskPromise::final_suspend - final suspend point");
-    return std::suspend_always{};
+    // TODO: delete it
+    if (detached_) {
+      LOG_INFO(
+          "TaskPromise::final_suspend - task is detached, skipping "
+          "continuation resume");
+    } else {
+      LOG_INFO(
+          "TaskPromise::final_suspend - task is not detached, will resume "
+          "continuation if any");
+    }
+    return FinalAwaiter{detached_};
   }
+
+  void set_detached(bool detached) { detached_ = detached; }
 
   template <typename _ResultType>
   TaskAwaiter<_ResultType> await_transform(Task<_ResultType>&& task) {
@@ -199,7 +218,8 @@ struct TaskPromiseBase {
   std::condition_variable completion;
   std::weak_ptr<AbstractScheduler> scheduler =
       SchedulerManager::get_default_scheduler();
-  bool started = false;  // 防止重复启动
+  bool started = false;    // 防止重复启动
+  bool detached_ = false;  // 是否分离（自动销毁）
 
   // Continuation: 当前任务完成后要恢复的协程句柄
   std::coroutine_handle<> continuation_ = nullptr;

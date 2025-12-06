@@ -17,7 +17,53 @@
 - CPU 密集型任务应当提交到计算线程池（可通过自建 `AsyncExecutor` 或类似机制），I/O 密集型任务优先使用 `IO Scheduler`（默认通过 `SchedulerManager` 提供）。
 - 对于需要线程亲和性（如访问非线程安全资源或 UI 更新），使用 `LooperExecutor` 并通过 `co_await switch_to(looper_executor)` 切换到该上下文。
 
-## 4. 性能优化
+
+## 4. 性能分析 (Profiling)
+
+为了确保你的协程应用达到最佳性能，建议定期进行性能分析。
+
+### 构建配置
+
+在进行性能分析之前，请确保使用 `RelWithDebInfo` 模式构建项目。这既能开启优化，又能保留调试符号，方便定位热点函数。
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --config RelWithDebInfo
+```
+
+### macOS 平台分析工具
+
+在 macOS 上，你可以使用以下工具：
+
+1.  **Instruments (Time Profiler)**:
+    Xcode 自带的强大图形化分析工具。
+    *   打开 Instruments (`Cmd+I` in Xcode, or open separately).
+    *   选择 "Time Profiler".
+    *   选择你的可执行文件并开始录制。
+    *   分析调用栈，找出耗时最长的函数。
+
+2.  **`sample` 命令行工具**:
+    如果你只需要快速查看运行中进程的采样：
+    ```bash
+    # 假设你的程序 PID 是 12345
+    sample 12345 10 -f output.txt
+    ```
+    这会采样 10 秒并将结果输出到 `output.txt`。
+
+### Linux 平台分析工具
+
+在 Linux 上，`perf` 是最常用的工具：
+
+```bash
+# 记录性能数据
+perf record -g ./your_application
+
+# 查看分析报告
+perf report
+```
+
+通过火焰图 (FlameGraph) 可以更直观地查看协程调度和业务逻辑的开销分布。
+
 
 - 减少频繁的 `start()`/`resume()` 切换，尽量把短任务合并在同一协程内完成；
 - 避免在执行器线程内做大量阻塞操作，除非该执行器专门用于阻塞 I/O；
