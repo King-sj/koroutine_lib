@@ -11418,7 +11418,7 @@ inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 size_t content_length,
                                                 const std::string& content_type,
                                                 UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, body, content_length, nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11428,7 +11428,7 @@ inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
                                                 const std::string& body,
                                                 const std::string& content_type,
                                                 UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, body.data(), body.size(), nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11437,7 +11437,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, const Headers& headers, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type, nullptr, progress);
 }
@@ -11446,7 +11446,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, const Headers& headers, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     ContentReceiver content_receiver, DownloadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type,
       std::move(content_receiver), std::move(progress));
@@ -11456,7 +11456,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
     const std::string& path, const Headers& headers,
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, nullptr, progress);
 }
@@ -11466,7 +11466,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     DownloadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, std::move(content_receiver), std::move(progress));
 }
@@ -11478,7 +11478,7 @@ inline koroutine::Task<Result> ClientImpl::Post(
   const auto& boundary = detail::make_multipart_data_boundary();
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "POST", path, headers, nullptr, 0, nullptr,
       get_multipart_content_provider(boundary, items, provider_items),
       content_type, nullptr, progress);
@@ -11622,7 +11622,7 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                size_t content_length,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, body, content_length, nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11632,7 +11632,7 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                const std::string& body,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, body.data(), body.size(), nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11643,7 +11643,7 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
                                                ContentProvider content_provider,
                                                const std::string& content_type,
                                                UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type, nullptr, progress);
 }
@@ -11652,7 +11652,7 @@ inline koroutine::Task<Result> ClientImpl::Put(
     const std::string& path, const Headers& headers, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     ContentReceiver content_receiver, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type,
       std::move(content_receiver), progress);
@@ -11662,7 +11662,7 @@ inline koroutine::Task<Result> ClientImpl::Put(
     const std::string& path, const Headers& headers,
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, nullptr, progress);
 }
@@ -11672,7 +11672,7 @@ inline koroutine::Task<Result> ClientImpl::Put(
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, std::move(content_receiver), progress);
 }
@@ -11684,7 +11684,7 @@ inline koroutine::Task<Result> ClientImpl::Put(
   const auto& boundary = detail::make_multipart_data_boundary();
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PUT", path, headers, nullptr, 0, nullptr,
       get_multipart_content_provider(boundary, items, provider_items),
       content_type, nullptr, progress);
@@ -11821,7 +11821,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const Headers& headers, const char* body,
     size_t content_length, const std::string& content_type,
     UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, body, content_length, nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11829,7 +11829,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
 inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const Headers& headers, const std::string& body,
     const std::string& content_type, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, body.data(), body.size(), nullptr, nullptr,
       content_type, nullptr, progress);
 }
@@ -11838,7 +11838,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const Headers& headers, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type, nullptr, progress);
 }
@@ -11847,7 +11847,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const Headers& headers, size_t content_length,
     ContentProvider content_provider, const std::string& content_type,
     ContentReceiver content_receiver, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, nullptr, content_length,
       std::move(content_provider), nullptr, content_type,
       std::move(content_receiver), progress);
@@ -11857,7 +11857,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
     const std::string& path, const Headers& headers,
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, nullptr, progress);
 }
@@ -11867,7 +11867,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
     ContentProviderWithoutLength content_provider,
     const std::string& content_type, ContentReceiver content_receiver,
     UploadProgress progress) {
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, nullptr, 0, nullptr, std::move(content_provider),
       content_type, std::move(content_receiver), progress);
 }
@@ -11879,7 +11879,7 @@ inline koroutine::Task<Result> ClientImpl::Patch(
   const auto& boundary = detail::make_multipart_data_boundary();
   const auto& content_type =
       detail::serialize_multipart_formdata_get_content_type(boundary);
-  return send_with_content_provider_and_receiver(
+  co_return co_await send_with_content_provider_and_receiver(
       "PATCH", path, headers, nullptr, 0, nullptr,
       get_multipart_content_provider(boundary, items, provider_items),
       content_type, nullptr, progress);

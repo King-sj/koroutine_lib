@@ -72,11 +72,12 @@ TEST_F(HttpTest, BasicGetPost) {
     };
     koroutine::Runtime::spawn(server_task(svr, port));
 
-    EXPECT_EQ(svr->bind_port(), port);
     std::cout << "Spawned server task" << std::endl;
 
     std::cout << "Waiting for server startup" << std::endl;
     co_await koroutine::SleepAwaiter(100);
+
+    EXPECT_EQ(svr->bind_port(), port);
 
     Client cli("http://127.0.0.1:" + std::to_string(port));
 
