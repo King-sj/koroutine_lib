@@ -58,8 +58,7 @@ TEST_F(HttpTest, BasicGetPost) {
     });
 
     std::cout << "About to spawn server task" << std::endl;
-    koroutine::Runtime::spawn([](std::shared_ptr<Server> svr,
-                                 int port) -> Task<void> {
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
       std::cout << "Inside spawned task lambda" << std::endl;
       try {
         std::cout << "Starting server listen" << std::endl;
@@ -70,7 +69,8 @@ TEST_F(HttpTest, BasicGetPost) {
       } catch (...) {
         std::cout << "Server listen threw unknown exception" << std::endl;
       }
-    }(svr, port));
+    };
+    koroutine::Runtime::spawn(server_task(svr, port));
     std::cout << "Spawned server task" << std::endl;
 
     std::cout << "Waiting for server startup" << std::endl;
@@ -116,9 +116,10 @@ TEST_F(HttpTest, LargeHeaders) {
       co_return;
     });
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 
@@ -147,9 +148,10 @@ TEST_F(HttpTest, NotFound) {
     auto svr = std::make_shared<Server>();
     int port = 8084;
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 
@@ -178,9 +180,10 @@ TEST_F(HttpTest, ConcurrentRequests) {
       co_return;
     });
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 
@@ -217,9 +220,10 @@ TEST_F(HttpTest, LargeBody) {
       co_return;
     });
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 
@@ -250,9 +254,10 @@ TEST_F(HttpTest, KeepAlive) {
       co_return;
     });
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 
@@ -289,9 +294,10 @@ TEST_F(HttpTest, MultipartFormData) {
       co_return;
     });
 
-    koroutine::Runtime::spawn([svr, port]() -> Task<void> {
+    auto server_task = [svr, port]() -> Task<void> {
       co_await svr->listen_async("127.0.0.1", port);
-    }());
+    };
+    koroutine::Runtime::spawn(server_task());
 
     co_await koroutine::SleepAwaiter(100);
 

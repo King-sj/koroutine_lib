@@ -9574,10 +9574,11 @@ inline koroutine::Task<bool> Server::process_and_close_socket(socket_t sock) {
       svr_sock_, sock, keep_alive_max_count_, keep_alive_timeout_sec_,
       read_timeout_sec_, read_timeout_usec_, write_timeout_sec_,
       write_timeout_usec_,
-      [&](Stream& strm, bool close_connection, bool& connection_closed) {
-        return process_request(strm, remote_addr, remote_port, local_addr,
-                               local_port, close_connection, connection_closed,
-                               nullptr);
+      [&](Stream& strm, bool close_connection,
+          bool& connection_closed) -> koroutine::Task<bool> {
+        co_return co_await process_request(
+            strm, remote_addr, remote_port, local_addr, local_port,
+            close_connection, connection_closed, nullptr);
       });
 
   detail::shutdown_socket(sock);
@@ -9973,7 +9974,7 @@ inline koroutine::Task<bool> ClientImpl::send_(Request& req, Response& res,
 
 inline koroutine::Task<Result> ClientImpl::send(const Request& req) {
   auto req2 = req;
-  return send_(std::move(req2));
+  co_return co_await send_(std::move(req2));
 }
 
 inline koroutine::Task<Result> ClientImpl::send_(Request req) {
@@ -11147,11 +11148,11 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                const Headers& headers,
                                                DownloadProgress progress) {
   if (params.empty()) {
-    return Get(path, headers);
+    co_return co_await Get(path, headers);
   }
 
   std::string path_with_query = append_query_params(path, params);
-  return Get(path_with_query, headers, std::move(progress));
+  co_return co_await Get(path_with_query, headers, std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
@@ -11166,30 +11167,30 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
     req.start_time_ = std::chrono::steady_clock::now();
   }
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                ContentReceiver content_receiver,
                                                DownloadProgress progress) {
-  return Get(path, Headers(), nullptr, std::move(content_receiver),
-             std::move(progress));
+  co_return co_await Get(path, Headers(), nullptr, std::move(content_receiver),
+                         std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                const Headers& headers,
                                                ContentReceiver content_receiver,
                                                DownloadProgress progress) {
-  return Get(path, headers, nullptr, std::move(content_receiver),
-             std::move(progress));
+  co_return co_await Get(path, headers, nullptr, std::move(content_receiver),
+                         std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                ResponseHandler response_handler,
                                                ContentReceiver content_receiver,
                                                DownloadProgress progress) {
-  return Get(path, Headers(), std::move(response_handler),
-             std::move(content_receiver), std::move(progress));
+  co_return co_await Get(path, Headers(), std::move(response_handler),
+                         std::move(content_receiver), std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
@@ -11212,7 +11213,7 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
     req.start_time_ = std::chrono::steady_clock::now();
   }
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
@@ -11220,8 +11221,8 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                const Headers& headers,
                                                ContentReceiver content_receiver,
                                                DownloadProgress progress) {
-  return Get(path, params, headers, nullptr, std::move(content_receiver),
-             std::move(progress));
+  co_return co_await Get(path, params, headers, nullptr,
+                         std::move(content_receiver), std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
@@ -11231,17 +11232,17 @@ inline koroutine::Task<Result> ClientImpl::Get(const std::string& path,
                                                ContentReceiver content_receiver,
                                                DownloadProgress progress) {
   if (params.empty()) {
-    return Get(path, headers, std::move(response_handler),
-               std::move(content_receiver), std::move(progress));
+    co_return co_await Get(path, headers, std::move(response_handler),
+                           std::move(content_receiver), std::move(progress));
   }
 
   std::string path_with_query = append_query_params(path, params);
-  return Get(path_with_query, headers, std::move(response_handler),
-             std::move(content_receiver), std::move(progress));
+  co_return co_await Get(path_with_query, headers, std::move(response_handler),
+                         std::move(content_receiver), std::move(progress));
 }
 
 inline koroutine::Task<Result> ClientImpl::Head(const std::string& path) {
-  return Head(path, Headers());
+  co_return co_await Head(path, Headers());
 }
 
 inline koroutine::Task<Result> ClientImpl::Head(const std::string& path,
@@ -11254,11 +11255,11 @@ inline koroutine::Task<Result> ClientImpl::Head(const std::string& path,
     req.start_time_ = std::chrono::steady_clock::now();
   }
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path) {
-  return Post(path, std::string(), std::string());
+  co_return co_await Post(path, std::string(), std::string());
 }
 
 inline koroutine::Task<Result> ClientImpl::Post(const std::string& path,
@@ -11450,11 +11451,11 @@ inline koroutine::Task<Result> ClientImpl::Post(
     req.set_header("Content-Type", content_type);
   }
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path) {
-  return Put(path, std::string(), std::string());
+  co_return co_await Put(path, std::string(), std::string());
 }
 
 inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
@@ -11655,11 +11656,11 @@ inline koroutine::Task<Result> ClientImpl::Put(const std::string& path,
     req.set_header("Content-Type", content_type);
   }
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path) {
-  return Patch(path, std::string(), std::string());
+  co_return co_await Patch(path, std::string(), std::string());
 }
 
 inline koroutine::Task<Result> ClientImpl::Patch(const std::string& path,
@@ -11862,27 +11863,28 @@ inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
 inline koroutine::Task<Result> ClientImpl::Delete(
     const std::string& path, const char* body, size_t content_length,
     const std::string& content_type, DownloadProgress progress) {
-  return Delete(path, Headers(), body, content_length, content_type, progress);
+  co_return co_await Delete(path, Headers(), body, content_length, content_type,
+                            progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(
     const std::string& path, const std::string& body,
     const std::string& content_type, DownloadProgress progress) {
-  return Delete(path, Headers(), body.data(), body.size(), content_type,
-                progress);
+  co_return co_await Delete(path, Headers(), body.data(), body.size(),
+                            content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(
     const std::string& path, const Headers& headers, const std::string& body,
     const std::string& content_type, DownloadProgress progress) {
-  return Delete(path, headers, body.data(), body.size(), content_type,
-                progress);
+  co_return co_await Delete(path, headers, body.data(), body.size(),
+                            content_type, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
                                                   const Params& params,
                                                   DownloadProgress progress) {
-  return Delete(path, Headers(), params, progress);
+  co_return co_await Delete(path, Headers(), params, progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
@@ -11890,8 +11892,8 @@ inline koroutine::Task<Result> ClientImpl::Delete(const std::string& path,
                                                   const Params& params,
                                                   DownloadProgress progress) {
   auto query = detail::params_to_query_str(params);
-  return Delete(path, headers, query, "application/x-www-form-urlencoded",
-                progress);
+  co_return co_await Delete(path, headers, query,
+                            "application/x-www-form-urlencoded", progress);
 }
 
 inline koroutine::Task<Result> ClientImpl::Delete(
@@ -11912,11 +11914,11 @@ inline koroutine::Task<Result> ClientImpl::Delete(
   }
   req.body.assign(body, content_length);
 
-  return send_(std::move(req));
+  co_return co_await send_(std::move(req));
 }
 
 inline koroutine::Task<Result> ClientImpl::Options(const std::string& path) {
-  return Options(path, Headers());
+  co_return co_await Options(path, Headers());
 }
 
 inline koroutine::Task<Result> ClientImpl::Options(const std::string& path,
@@ -12530,11 +12532,12 @@ inline bool SSLServer::process_and_close_socket(socket_t sock) {
         svr_sock_, ssl, sock, keep_alive_max_count_, keep_alive_timeout_sec_,
         read_timeout_sec_, read_timeout_usec_, write_timeout_sec_,
         write_timeout_usec_,
-        [&](Stream& strm, bool close_connection, bool& connection_closed) {
-          return process_request(strm, remote_addr, remote_port, local_addr,
-                                 local_port, close_connection,
-                                 connection_closed,
-                                 [&](Request& req) { req.ssl = ssl; });
+        [&](Stream& strm, bool close_connection,
+            bool& connection_closed) -> koroutine::Task<bool> {
+          co_return co_await process_request(
+              strm, remote_addr, remote_port, local_addr, local_port,
+              close_connection, connection_closed,
+              [&](Request& req) { req.ssl = ssl; });
         });
 
     // Shutdown gracefully if the result seemed successful, non-gracefully if
@@ -12715,14 +12718,15 @@ inline bool SSLClient::connect_with_proxy(
   if (!detail::process_client_socket(
           socket.sock, read_timeout_sec_, read_timeout_usec_,
           write_timeout_sec_, write_timeout_usec_, max_timeout_msec_,
-          start_time, [&](Stream& strm) {
+          start_time, [&](Stream& strm) -> koroutine::Task<bool> {
             Request req2;
             req2.method = "CONNECT";
             req2.path = host_and_port_;
             if (max_timeout_msec_ > 0) {
               req2.start_time_ = std::chrono::steady_clock::now();
             }
-            return process_request(strm, req2, proxy_res, false, error);
+            co_return co_await process_request(strm, req2, proxy_res, false,
+                                               error);
           })) {
     // Thread-safe to close everything because we are assuming there are no
     // requests in flight
@@ -12755,7 +12759,7 @@ inline bool SSLClient::connect_with_proxy(
         if (!detail::process_client_socket(
                 socket.sock, read_timeout_sec_, read_timeout_usec_,
                 write_timeout_sec_, write_timeout_usec_, max_timeout_msec_,
-                start_time, [&](Stream& strm) {
+                start_time, [&](Stream& strm) -> koroutine::Task<bool> {
                   Request req3;
                   req3.method = "CONNECT";
                   req3.path = host_and_port_;
@@ -12766,7 +12770,8 @@ inline bool SSLClient::connect_with_proxy(
                   if (max_timeout_msec_ > 0) {
                     req3.start_time_ = std::chrono::steady_clock::now();
                   }
-                  return process_request(strm, req3, proxy_res, false, error);
+                  co_return co_await process_request(strm, req3, proxy_res,
+                                                     false, error);
                 })) {
           // Thread-safe to close everything because we are assuming there are
           // no requests in flight
@@ -13761,7 +13766,7 @@ inline koroutine::Task<bool> Client::send(Request& req, Response& res,
 }
 
 inline koroutine::Task<Result> Client::send(const Request& req) {
-  return cli_->send(req);
+  co_return co_await cli_->send(req);
 }
 
 inline void Client::stop() { cli_->stop(); }
