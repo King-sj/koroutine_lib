@@ -5,7 +5,7 @@
 #ifdef __APPLE__
 #include "koroutine/async_io/platform/macos/kqueue_engin.h"
 #elif defined(__linux__)
-// #include "koroutine/async_io/platform/linux/epoll_engin.h"
+#include "koroutine/async_io/platform/linux/io_uring_engin.h"
 #elif defined(_WIN32)
 // #include "koroutine/async_io/platform/win/iocp_engin.h"
 #endif
@@ -16,8 +16,7 @@ std::shared_ptr<IOEngine> IOEngine::create() {
 #ifdef __APPLE__
   return std::make_shared<KqueueIOEngine>();
 #elif defined(__linux__)
-  // return std::make_shared<EpollIOEngine>();
-  throw std::runtime_error("Linux engine not implemented yet");
+  return std::make_shared<IoUringIOEngine>();
 #elif defined(_WIN32)
   // return std::make_shared<IOCPIOEngine>();
   throw std::runtime_error("Windows engine not implemented yet");

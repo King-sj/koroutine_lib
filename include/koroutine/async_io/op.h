@@ -31,6 +31,11 @@ class AsyncIOOp {
   struct sockaddr_storage addr;
   socklen_t addr_len;
 
+#ifdef __linux__
+  struct msghdr msg;
+  struct iovec iov;
+#endif
+
   AsyncIOOp(OpType op_type, std::shared_ptr<AsyncIOObject> obj, void* buf,
             size_t sz)
       : type(op_type),

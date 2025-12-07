@@ -2,7 +2,7 @@
 enable_testing()
 
 # 找到 GTest（如果你在别处已经 find_package 过，可以移除这行）
-find_package(GTest REQUIRED)
+# find_package(GTest REQUIRED)
 include(GoogleTest)
 
 # 搜索所有单元测试源文件（相对于当前 CMakeLists.txt 的路径）

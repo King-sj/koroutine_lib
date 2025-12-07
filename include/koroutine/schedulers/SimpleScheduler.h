@@ -22,6 +22,9 @@ class SimpleScheduler : public AbstractScheduler {
       return;
     }
 
+    LOG_DEBUG("SimpleScheduler::schedule - request debug name: ",
+              request.metadata().debug_name);
+
     if (delay_ms > 0) {
       LOG_TRACE(
           "SimpleScheduler::schedule - scheduling delayed request with delay: ",

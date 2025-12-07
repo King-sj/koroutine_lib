@@ -4,6 +4,15 @@
 
 `koroutine_lib` 提供了一个强大的、跨平台的异步 I/O 模块——`async_io`，它将底层复杂的系统调用（如 `io_uring`, `kqueue`, `IOCP`）封装在统一、简洁的协程接口之后。
 
+## 系统依赖
+
+为了使用 `async_io` 模块，你需要确保系统安装了相应的依赖库：
+
+- **Linux**: 需要安装 `liburing`。
+  - Ubuntu/Debian: `sudo apt install liburing-dev`
+  - Fedora/CentOS: `sudo dnf install liburing-devel`
+  - Arch Linux: `sudo pacman -S liburing`
+
 ## 1. `IOEngine`: 异步 I/O 的心脏
 
 `IOEngine` 是 `async_io` 模块的核心。它是一个在后台运行的事件循环，专门负责监听 I/O 事件。当一个异步 I/O 操作被发起时，它并不会阻塞当前协程，而是将这个操作注册到 `IOEngine`。当前协程会挂起，`IOEngine` 则在后台等待操作系统通知该操作完成。一旦完成，`IOEngine` 会负责唤醒之前挂起的协程。

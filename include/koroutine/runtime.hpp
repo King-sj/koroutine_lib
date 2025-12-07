@@ -52,6 +52,55 @@ class AggregateException : public std::exception {
  * 提供在同步代码中运行异步协程的能力
  */
 namespace Runtime {
+
+struct BlockOnPromise {
+  std::atomic<bool>* is_completed = nullptr;
+  std::mutex* mtx = nullptr;
+  std::condition_variable* cv = nullptr;
+
+  struct BlockOnTask {
+    using promise_type = BlockOnPromise;
+    std::coroutine_handle<promise_type> handle;
+  };
+
+  BlockOnTask get_return_object() {
+    return {std::coroutine_handle<BlockOnPromise>::from_promise(*this)};
+  }
+
+  std::suspend_always initial_suspend() { return {}; }
+
+  struct FinalAwaiter {
+    BlockOnPromise& p;
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<>) const noexcept {
+      if (p.mtx && p.cv && p.is_completed) {
+        std::lock_guard lock(*p.mtx);
+        p.is_completed->store(true);
+        p.cv->notify_one();
+      }
+    }
+    void await_resume() const noexcept {}
+  };
+
+  FinalAwaiter final_suspend() noexcept { return {*this}; }
+
+  void return_void() {}
+  void unhandled_exception() {
+    LOG_ERROR("BlockOnPromise::unhandled_exception - terminating");
+    std::terminate();
+  }
+
+  template <typename R>
+  auto await_transform(Task<R>&& task) {
+    LOG_TRACE("BlockOnPromise::await_transform - installing default scheduler");
+    auto awaiter = TaskAwaiter<R>{std::move(task)};
+    awaiter.install_scheduler(SchedulerManager::get_default_scheduler());
+    return awaiter;
+  }
+};
+
+using BlockOnTask = BlockOnPromise::BlockOnTask;
+
 template <typename ResultType>
 static ResultType block_on(Task<ResultType>&& task) {
   LOG_TRACE("Runtime::block_on - blocking on task for result");
@@ -62,43 +111,35 @@ static ResultType block_on(Task<ResultType>&& task) {
   std::atomic<bool> is_completed = false;
 
   // 创建包装任务来捕获结果和异常
-  auto wrapper = [](Task<ResultType> t, auto& result, auto& exception_ptr,
-                    auto& mtx, auto& cv, auto& is_completed) -> Task<void> {
+  auto wrapper = [](Task<ResultType> t, auto& result,
+                    auto& exception_ptr) -> BlockOnTask {
     try {
       ResultType res = co_await std::move(t);
       LOG_TRACE("Runtime::block_on - task completed successfully");
-      std::lock_guard lock(mtx);
       result = std::move(res);
-      is_completed = true;
-      cv.notify_one();
     } catch (...) {
       LOG_TRACE("Runtime::block_on - task completed with exception");
-      std::lock_guard lock(mtx);
       exception_ptr = std::current_exception();
-      is_completed = true;
-      cv.notify_one();
     }
   };
 
-  auto wrapper_task =
-      wrapper(std::move(task), result, exception_ptr, mtx, cv, is_completed);
-  wrapper_task.start();
+  auto wrapper_task = wrapper(std::move(task), result, exception_ptr);
+  wrapper_task.handle.promise().mtx = &mtx;
+  wrapper_task.handle.promise().cv = &cv;
+  wrapper_task.handle.promise().is_completed = &is_completed;
+
+  // Start manually using default scheduler
+  auto scheduler = SchedulerManager::get_default_scheduler();
+  ScheduleMetadata meta(ScheduleMetadata::Priority::Normal, "block_on_wrapper");
+  scheduler->schedule(ScheduleRequest(wrapper_task.handle, std::move(meta)), 0);
 
   LOG_TRACE("Runtime::block_on - waiting for task to complete");
   std::unique_lock lock(mtx);
   cv.wait(lock, [&is_completed]() { return is_completed.load(); });
 
-  // Wait for the wrapper coroutine to reach final suspend to avoid
-  // use-after-free The coroutine might still be running destructors of locals
-  // (like lock_guard) even after notifying the CV. We must ensure it is fully
-  // suspended before we return and destroy the task handle.
-  while (!wrapper_task.is_done()) {
-    LOG_WARN(
-        "Runtime::block_on - waiting for wrapper task to reach final "
-        "suspend");
-    lock.unlock();
-    std::this_thread::yield();
-    lock.lock();
+  // Cleanup wrapper task
+  if (wrapper_task.handle) {
+    wrapper_task.handle.destroy();
   }
 
   if (exception_ptr) {
