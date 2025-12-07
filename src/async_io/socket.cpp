@@ -6,7 +6,9 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mswsock.h>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "Mswsock.lib")
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -74,6 +76,36 @@ Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(
                             "Failed to create socket");
   }
   intptr_t fd = static_cast<intptr_t>(sockfd);
+
+  // Bind is required for ConnectEx
+  struct sockaddr_storage bind_addr;
+  std::memset(&bind_addr, 0, sizeof(bind_addr));
+  bind_addr.ss_family = family;
+  int bind_len =
+      (family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+
+  if (::bind(sockfd, (struct sockaddr*)&bind_addr, bind_len) != 0) {
+    close_socket(fd);
+    throw std::system_error(WSAGetLastError(), std::system_category(),
+                            "Bind failed");
+  }
+
+  auto socket = std::make_shared<AsyncSocket>(engine, fd);
+  auto io_op = std::make_shared<AsyncIOOp>(
+      OpType::CONNECT, socket->shared_from_this(), nullptr, 0);
+
+  std::memcpy(&io_op->addr, endpoint.data(), endpoint.length());
+  io_op->addr_len = endpoint.length();
+
+  co_await IOAwaiter<void>{io_op};
+
+  // Update connect context
+  if (setsockopt(sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0) != 0) {
+    // Ignore error
+  }
+
+  co_return socket;
+
 #else
 #if defined(__linux__)
   intptr_t sockfd = ::socket(family, type | SOCK_NONBLOCK, protocol);
@@ -85,7 +117,6 @@ Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(
                             "Failed to create socket");
   }
   intptr_t fd = sockfd;
-#endif
 
 #if !defined(__linux__)
   try {
@@ -101,18 +132,10 @@ Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(
   if (ret == 0) {
     co_return std::make_shared<AsyncSocket>(engine, fd);
   } else {
-#ifdef _WIN32
-    if (WSAGetLastError() != WSAEWOULDBLOCK) {
-      close_socket(fd);
-      throw std::system_error(WSAGetLastError(), std::system_category(),
-                              "Connect failed");
-    }
-#else
     if (errno != EINPROGRESS) {
       close_socket(fd);
       throw std::system_error(errno, std::generic_category(), "Connect failed");
     }
-#endif
   }
 
   auto socket = std::make_shared<AsyncSocket>(engine, fd);
@@ -134,6 +157,7 @@ Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(
   }
 
   co_return socket;
+#endif
 }
 
 Task<std::shared_ptr<AsyncSocket>> AsyncSocket::connect(const std::string& host,

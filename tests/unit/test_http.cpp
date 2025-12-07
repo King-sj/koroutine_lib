@@ -7,6 +7,7 @@
 #include "koroutine/async_io/httplib.h"
 #include "koroutine/debug.h"
 #include "koroutine/koroutine.h"
+#include "koroutine/when_all.hpp"
 using namespace koroutine;
 using namespace httplib;
 
@@ -14,13 +15,14 @@ class HttpTest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Setup code if needed
-    debug::set_level(debug::Level::Debug);
+    debug::set_level(debug::Level::Error);
     debug::set_detail_flags(debug::Detail::Level | debug::Detail::Timestamp |
                             debug::Detail::ThreadId | debug::Detail::FileLine);
   }
 
   void TearDown() override {
     // Teardown code if needed
+    std::cout << "HttpTest::TearDown" << std::endl;
   }
 
   // Helper to generate random string

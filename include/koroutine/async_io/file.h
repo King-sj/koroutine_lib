@@ -3,6 +3,7 @@
 // 平台相关的头文件
 #ifdef _WIN32
 #include <io.h>
+#include <fcntl.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -86,12 +87,31 @@ class AsyncFile : public AsyncIOObject,
     // 平台相关的文件打开操作
 #ifdef _WIN32
     // Windows 平台
-    intptr_t fd =
-        ::_open(path.c_str(), translate_mode(mode), _S_IREAD | _S_IWRITE);
-    if (fd < 0) {
-      throw std::system_error(errno, std::generic_category(),
+    DWORD access = 0;
+    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    DWORD creation = 0;
+    DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED;
+
+    if (mode & std::ios::in) access |= GENERIC_READ;
+    if (mode & std::ios::out) access |= GENERIC_WRITE;
+
+    if (mode & std::ios::trunc) {
+      creation = CREATE_ALWAYS;
+    } else if ((mode & std::ios::out) && (mode & std::ios::app)) {
+      creation = OPEN_ALWAYS;
+    } else if ((mode & std::ios::out) && !(mode & std::ios::in)) {
+      creation = CREATE_ALWAYS;
+    } else {
+      creation = OPEN_EXISTING;
+    }
+
+    HANDLE hFile =
+        CreateFileA(path.c_str(), access, share, NULL, creation, flags, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+      throw std::system_error(GetLastError(), std::system_category(),
                               "Failed to open file");
     }
+    intptr_t fd = (intptr_t)hFile;
 #else
     // POSIX 平台 (Linux, macOS)
     int flags = translate_mode(mode);
@@ -148,6 +168,7 @@ class AsyncFile : public AsyncIOObject,
   }
 
   intptr_t native_handle() const override { return fd_; }
+  IOObjectType type() const override { return IOObjectType::File; }
 
   Task<void> seek(size_t position) {
     // 模拟seek操作

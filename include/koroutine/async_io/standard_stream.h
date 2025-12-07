@@ -84,6 +84,7 @@ class AsyncStandardStream
   }
 
   intptr_t native_handle() const override { return fd_; }
+  IOObjectType type() const override { return IOObjectType::File; }
 
  private:
   static Task<void> run_printer(std::weak_ptr<AsyncStandardStream> weak_self,

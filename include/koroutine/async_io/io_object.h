@@ -1,7 +1,7 @@
 #pragma once
 #include "koroutine/task.hpp"
 namespace koroutine::async_io {
-// enum class IOObjectType { File, Socket, Pipe, Timer, Signal, Other };
+enum class IOObjectType { File, Socket, Pipe, Timer, Signal, Other };
 enum class OpType {
   READ,
   WRITE,
@@ -29,6 +29,8 @@ class AsyncIOObject {
   virtual Task<void> close() = 0;
   // 获取底层句柄(平台相关)
   virtual intptr_t native_handle() const = 0;
+  // 获取对象类型
+  virtual IOObjectType type() const = 0;
 
   std::shared_ptr<IOEngine> get_engine() const { return engine_; }
 

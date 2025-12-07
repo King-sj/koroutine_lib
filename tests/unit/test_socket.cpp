@@ -253,13 +253,13 @@ TEST_F(SocketTest, DNSResolutionRealWorld) {
       for (const auto& ep : result_baidu.value()) {
         EXPECT_EQ(ep.port(), 443);
       }
+      // print ip addresses for debug
+      for (const auto& ep : result_baidu.value()) {
+        std::cout << "baidu.com resolved to: " << ep.address().to_string()
+                  << std::endl;
+      }
     } else {
       std::cerr << "Failed to resolve baidu.com: " << result_baidu.error()
-                << std::endl;
-    }
-    // print ip addresses for debug
-    for (const auto& ep : result_baidu.value()) {
-      std::cout << "baidu.com resolved to: " << ep.address().to_string()
                 << std::endl;
     }
   };

@@ -1,0 +1,358 @@
+#include "koroutine/async_io/platform/win/iocp_engin.h"
+
+#if defined(_WIN64)
+#include <mswsock.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#include <iostream>
+
+#include "koroutine/async_io/op.h"
+#include "koroutine/debug.h"
+
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "Mswsock.lib")
+
+namespace koroutine::async_io {
+
+static LPFN_ACCEPTEX lpAcceptEx = nullptr;
+static LPFN_CONNECTEX lpConnectEx = nullptr;
+static LPFN_GETACCEPTEXSOCKADDRS lpGetAcceptExSockaddrs = nullptr;
+
+static void load_mswsock_funcs() {
+  SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock == INVALID_SOCKET) return;
+
+  GUID guidAcceptEx = WSAID_ACCEPTEX;
+  DWORD bytes = 0;
+  WSAIoctl(sock, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidAcceptEx,
+           sizeof(guidAcceptEx), &lpAcceptEx, sizeof(lpAcceptEx), &bytes, NULL,
+           NULL);
+
+  GUID guidConnectEx = WSAID_CONNECTEX;
+  WSAIoctl(sock, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidConnectEx,
+           sizeof(guidConnectEx), &lpConnectEx, sizeof(lpConnectEx), &bytes,
+           NULL, NULL);
+
+  GUID guidGetAcceptExSockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
+  WSAIoctl(sock, SIO_GET_EXTENSION_FUNCTION_POINTER, &guidGetAcceptExSockaddrs,
+           sizeof(guidGetAcceptExSockaddrs), &lpGetAcceptExSockaddrs,
+           sizeof(lpGetAcceptExSockaddrs), &bytes, NULL, NULL);
+
+  closesocket(sock);
+}
+
+IOCPIOEngine::IOCPIOEngine() : running_(false), iocp_handle_(NULL) {
+  WSADATA wsaData;
+  int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (result != 0) {
+    LOG_ERROR("WSAStartup failed: ", result);
+    return;
+  }
+
+  iocp_handle_ = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+  if (iocp_handle_ == NULL) {
+    LOG_ERROR("CreateIoCompletionPort failed: ", GetLastError());
+  }
+
+  load_mswsock_funcs();
+  running_ = true;
+}
+
+IOCPIOEngine::~IOCPIOEngine() {
+  stop();
+  if (iocp_handle_) {
+    CloseHandle(iocp_handle_);
+  }
+  WSACleanup();
+}
+
+void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
+  if (!running_) {
+    op->error = std::make_error_code(std::errc::operation_canceled);
+    op->complete();
+    return;
+  }
+
+  SOCKET fd = (SOCKET)op->io_object->native_handle();
+
+  // Associate socket with IOCP if not already associated
+  // Note: CreateIoCompletionPort can be called multiple times for the same
+  // handle. It will just return the existing port.
+  // However, we should be careful about the completion key.
+  // Here we use the fd as the completion key.
+  if (CreateIoCompletionPort((HANDLE)fd, iocp_handle_, (ULONG_PTR)fd, 0) ==
+      NULL) {
+    DWORD err = GetLastError();
+    // ERROR_INVALID_PARAMETER might mean it's already associated with another
+    // port? Or just already associated.
+    // Usually it's fine.
+    if (err != ERROR_INVALID_PARAMETER) {
+      // LOG_WARN("CreateIoCompletionPort failed in submit: ", err);
+    }
+  }
+
+  DWORD bytes_transferred = 0;
+  int result = 0;
+  DWORD flags = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(ops_mutex_);
+    in_flight_ops_[&op->overlapped] = op;
+  }
+
+  switch (op->type) {
+    case OpType::READ: {
+      if (op->io_object->type() == IOObjectType::File) {
+        int res = ReadFile((HANDLE)fd, op->buffer, static_cast<DWORD>(op->size),
+                           &bytes_transferred, &op->overlapped);
+        if (res) {
+          result = TRUE;
+        } else {
+          result = (GetLastError() == ERROR_IO_PENDING) ? TRUE : FALSE;
+        }
+      } else {
+        op->wsa_buf.buf = static_cast<char*>(op->buffer);
+        op->wsa_buf.len = static_cast<ULONG>(op->size);
+        op->flags = 0;
+        int res = WSARecv(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
+                          &op->overlapped, NULL);
+        result = (res == 0) ? TRUE : FALSE;
+      }
+      break;
+    }
+    case OpType::WRITE: {
+      if (op->io_object->type() == IOObjectType::File) {
+        int res =
+            WriteFile((HANDLE)fd, op->buffer, static_cast<DWORD>(op->size),
+                      &bytes_transferred, &op->overlapped);
+        if (res) {
+          result = TRUE;
+        } else {
+          result = (GetLastError() == ERROR_IO_PENDING) ? TRUE : FALSE;
+        }
+      } else {
+        op->wsa_buf.buf = static_cast<char*>(op->buffer);
+        op->wsa_buf.len = static_cast<ULONG>(op->size);
+        int res = WSASend(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
+                          &op->overlapped, NULL);
+        result = (res == 0) ? TRUE : FALSE;
+      }
+      break;
+    }
+    case OpType::ACCEPT: {
+      if (!lpAcceptEx || !lpGetAcceptExSockaddrs) {
+        op->error = std::make_error_code(std::errc::function_not_supported);
+        op->complete();
+        return;
+      }
+
+      // Create a new socket for the connection
+      // We need to know the family/type/protocol.
+      // We determine the family from the listening socket.
+      int family = AF_INET;
+      struct sockaddr_storage listen_addr;
+      int listen_addr_len = sizeof(listen_addr);
+      if (getsockname(fd, (struct sockaddr*)&listen_addr, &listen_addr_len) ==
+          0) {
+        family = listen_addr.ss_family;
+      }
+
+      op->accept_sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+      if (op->accept_sock == INVALID_SOCKET) {
+        op->error = std::make_error_code(std::errc::io_error);
+        op->complete();
+        return;
+      }
+
+      // Allocate buffer for addresses
+      // sizeof(sockaddr_storage) + 16 for local and remote
+      size_t addr_len = sizeof(sockaddr_storage) + 16;
+      size_t buf_size = addr_len * 2;
+      op->internal_buffer = std::make_unique<char[]>(buf_size);
+
+      result =
+          lpAcceptEx(fd, op->accept_sock, op->internal_buffer.get(),
+                     0,  // dwReceiveDataLength = 0 (don't wait for data)
+                     addr_len, addr_len, &bytes_transferred, &op->overlapped);
+      break;
+    }
+    case OpType::CONNECT: {
+      if (!lpConnectEx) {
+        op->error = std::make_error_code(std::errc::function_not_supported);
+        op->complete();
+        return;
+      }
+
+      // ConnectEx requires the socket to be bound.
+      // We assume the socket is already bound in AsyncSocket::connect.
+      // If not, ConnectEx will fail with WSAEINVAL.
+
+      // op->addr should contain the target address
+      const struct sockaddr* name = (const struct sockaddr*)&op->addr;
+      int namelen = op->addr_len;
+
+      result = lpConnectEx(fd, name, namelen, NULL, 0, &bytes_transferred,
+                           &op->overlapped);
+      break;
+    }
+    case OpType::RECVFROM: {
+      op->wsa_buf.buf = static_cast<char*>(op->buffer);
+      op->wsa_buf.len = static_cast<ULONG>(op->size);
+      op->flags = 0;
+      op->addr_len = sizeof(op->addr);
+      int res = WSARecvFrom(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
+                            (struct sockaddr*)&op->addr, &op->addr_len,
+                            &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
+      break;
+    }
+    case OpType::SENDTO: {
+      op->wsa_buf.buf = static_cast<char*>(op->buffer);
+      op->wsa_buf.len = static_cast<ULONG>(op->size);
+      int res = WSASendTo(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
+                          (const struct sockaddr*)&op->addr, op->addr_len,
+                          &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
+      break;
+    }
+    case OpType::CLOSE: {
+      // Just close the socket.
+      // This will cancel pending IOs.
+      if (op->io_object->type() == IOObjectType::File) {
+        CloseHandle((HANDLE)fd);
+      } else {
+        closesocket(fd);
+      }
+      // We should schedule the coroutine immediately as there's no async
+      // completion for close (unless we use DisconnectEx?)
+      // But AsyncIOOp expects a completion.
+      // We can PostQueuedCompletionStatus to simulate completion.
+      if (op->coro_handle) {
+        PostQueuedCompletionStatus(iocp_handle_, 0, (ULONG_PTR)fd,
+                                   &op->overlapped);
+      }
+      return;
+    }
+    default:
+      op->error = std::make_error_code(std::errc::operation_not_supported);
+      op->complete();
+      return;
+  }
+
+  if (result == FALSE) {
+    int error = WSAGetLastError();
+    if (error != ERROR_IO_PENDING) {
+      LOG_ERROR("IOCP submit failed: ", error);
+      {
+        std::lock_guard<std::mutex> lock(ops_mutex_);
+        in_flight_ops_.erase(&op->overlapped);
+      }
+      op->error = std::make_error_code(std::errc::io_error);
+      op->complete();
+    }
+  }
+}
+
+void IOCPIOEngine::run() {
+  DWORD bytes_transferred;
+  ULONG_PTR completion_key;
+  LPOVERLAPPED overlapped;
+
+  while (running_) {
+    BOOL result = GetQueuedCompletionStatus(iocp_handle_, &bytes_transferred,
+                                            &completion_key, &overlapped, 100);
+
+    if (result == FALSE && overlapped == NULL) {
+      // Timeout or error not related to an IO operation
+      if (GetLastError() != WAIT_TIMEOUT) {
+        // LOG_ERROR("GetQueuedCompletionStatus failed: ", GetLastError());
+      }
+      continue;
+    }
+
+    if (overlapped == NULL) {
+      continue;
+    }
+
+    std::shared_ptr<AsyncIOOp> op_ptr;
+    {
+      std::lock_guard<std::mutex> lock(ops_mutex_);
+      auto it = in_flight_ops_.find(overlapped);
+      if (it != in_flight_ops_.end()) {
+        op_ptr = it->second;
+        in_flight_ops_.erase(it);
+      }
+    }
+
+    if (!op_ptr) {
+      // Operation might have been cancelled or not found
+      continue;
+    }
+
+    AsyncIOOp* op = op_ptr.get();
+
+    if (result == FALSE) {
+      // IO failed
+      op->error = std::make_error_code(std::errc::io_error);
+      op->actual_size = 0;
+    } else {
+      op->actual_size = bytes_transferred;
+      op->error = std::error_code();
+
+      if (op->type == OpType::ACCEPT) {
+        // Handle AcceptEx completion
+        // Update context
+        setsockopt(op->accept_sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
+                   (char*)&completion_key, sizeof(completion_key));
+
+        // Parse addresses
+        sockaddr *local_addr = nullptr, *remote_addr = nullptr;
+        int local_len = 0, remote_len = 0;
+        size_t addr_len = sizeof(sockaddr_storage) + 16;
+
+        lpGetAcceptExSockaddrs(op->internal_buffer.get(), 0, addr_len, addr_len,
+                               &local_addr, &local_len, &remote_addr,
+                               &remote_len);
+
+        // Copy remote address to op->buffer (client_addr)
+        if (op->buffer && op->size >= (size_t)remote_len) {
+          std::memcpy(op->buffer, remote_addr, remote_len);
+          // We might want to update the length if passed by pointer, but
+          // AsyncIOOp doesn't have a pointer to length.
+        }
+
+        // Return the new socket fd
+        op->actual_size = (size_t)op->accept_sock;
+      } else if (op->type == OpType::CONNECT) {
+        // Update connect context
+        setsockopt((SOCKET)op->io_object->native_handle(), SOL_SOCKET,
+                   SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
+      }
+    }
+
+    // Resume coroutine
+    op->complete();
+  }
+}
+
+void IOCPIOEngine::stop() {
+  running_ = false;
+  if (iocp_handle_) {
+    PostQueuedCompletionStatus(iocp_handle_, 0, 0, NULL);
+  }
+
+  // Cancel all pending operations
+  std::lock_guard<std::mutex> lock(ops_mutex_);
+  for (auto& [key, op] : in_flight_ops_) {
+    op->error = std::make_error_code(std::errc::operation_canceled);
+    op->complete();
+  }
+  in_flight_ops_.clear();
+}
+
+bool IOCPIOEngine::is_running() { return running_; }
+
+}  // namespace koroutine::async_io
+
+#endif  // _WIN64

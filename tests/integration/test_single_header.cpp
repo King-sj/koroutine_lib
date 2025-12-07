@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <fcntl.h>
 
 #include "koroutine/koroutine.hpp"
 

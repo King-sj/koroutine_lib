@@ -1,6 +1,17 @@
 # find all .cpp files in the src directory and subdirectories
 file(GLOB_RECURSE SOURCE_FILES "*.cpp")
 
+if(WIN32)
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/linux/")
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/macos/")
+elseif(APPLE)
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/linux/")
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/win/")
+elseif(UNIX)
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/macos/")
+    list(FILTER SOURCE_FILES EXCLUDE REGEX "/win/")
+endif()
+
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     find_path(LIBURING_INCLUDE_DIR liburing.h)
     find_library(LIBURING_LIBRARY uring)
