@@ -156,20 +156,12 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
       }
 
       // ConnectEx requires the socket to be bound.
-      struct sockaddr_in bind_addr;
-      std::memset(&bind_addr, 0, sizeof(bind_addr));
-      bind_addr.sin_family = AF_INET;
-      bind_addr.sin_addr.s_addr = INADDR_ANY;
-      bind_addr.sin_port = 0;
-      if (bind(fd, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) != 0) {
-        // If already bound, it might fail, which is fine?
-        // But usually we should bind if not bound.
-      }
+      // We assume the socket is already bound in AsyncSocket::connect.
+      // If not, ConnectEx will fail with WSAEINVAL.
 
-      // op->buffer should contain the target address (sockaddr*)
-      // op->size should be the length
-      const struct sockaddr* name = (const struct sockaddr*)op->buffer;
-      int namelen = (int)op->size;
+      // op->addr should contain the target address
+      const struct sockaddr* name = (const struct sockaddr*)&op->addr;
+      int namelen = op->addr_len;
 
       result = lpConnectEx(fd, name, namelen, NULL, 0, &bytes_transferred,
                            &op->overlapped);
