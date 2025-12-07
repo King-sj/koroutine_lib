@@ -13,6 +13,10 @@ class IOCPIOEngine : public IOEngine {
   void run() override;
   void stop() override;
   bool is_running() override;
+
+ private:
+  void* iocp_handle_;
+  std::atomic<bool> running_;
 };
 }  // namespace koroutine::async_io
 #endif  // _WIN64

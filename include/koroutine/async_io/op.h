@@ -36,6 +36,14 @@ class AsyncIOOp {
   struct iovec iov;
 #endif
 
+#ifdef _WIN32
+  OVERLAPPED overlapped;
+  WSABUF wsa_buf;
+  DWORD flags;
+  SOCKET accept_sock = INVALID_SOCKET;
+  std::unique_ptr<char[]> internal_buffer;
+#endif
+
   AsyncIOOp(OpType op_type, std::shared_ptr<AsyncIOObject> obj, void* buf,
             size_t sz)
       : type(op_type),
@@ -47,6 +55,13 @@ class AsyncIOOp {
         addr_len(sizeof(addr)) {
     scheduler = SchedulerManager::get_default_scheduler();
     std::memset(&addr, 0, sizeof(addr));
+#ifdef _WIN32
+    std::memset(&overlapped, 0, sizeof(overlapped));
+    wsa_buf.buf = static_cast<char*>(buffer);
+    wsa_buf.len = static_cast<ULONG>(size);
+    flags = 0;
+    accept_sock = INVALID_SOCKET;
+#endif
   }
 
   void complete() {
