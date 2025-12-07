@@ -1,11 +1,11 @@
 #pragma once
 #include "koroutine/debug.h"
-#include "koroutine/executors/looper_executor.h"
+#include "koroutine/executors/thread_pool_executor.h"
 #include "koroutine/schedulers/scheduler.h"
 namespace koroutine {
 class SimpleScheduler : public AbstractScheduler {
  public:
-  SimpleScheduler() : _executor(std::make_shared<LooperExecutor>()) {}
+  SimpleScheduler() : _executor(std::make_shared<ThreadPoolExecutor>()) {}
   ~SimpleScheduler() override { _executor->shutdown(); }
 
   // 引入基类的 schedule(long long) 方法
@@ -38,6 +38,6 @@ class SimpleScheduler : public AbstractScheduler {
   }
 
  private:
-  std::shared_ptr<LooperExecutor> _executor;
+  std::shared_ptr<AbstractExecutor> _executor;
 };
 }  // namespace koroutine

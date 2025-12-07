@@ -27,6 +27,11 @@ class AbstractExecutor {
       this->execute(std::move(f));
     }).detach();
   }
+  virtual void shutdown() {
+    LOG_INFO(
+        "AbstractExecutor::shutdown - default implementation does nothing");
+    throw std::runtime_error("AbstractExecutor::shutdown not implemented");
+  }
 };
 
 }  // namespace koroutine

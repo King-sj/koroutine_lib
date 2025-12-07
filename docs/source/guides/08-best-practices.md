@@ -14,8 +14,9 @@
 
 ## 3. 调度器与执行器选择
 
-- CPU 密集型任务应当提交到计算线程池（可通过自建 `AsyncExecutor` 或类似机制），I/O 密集型任务优先使用 `IO Scheduler`（默认通过 `SchedulerManager` 提供）。
-- 对于需要线程亲和性（如访问非线程安全资源或 UI 更新），使用 `LooperExecutor` 并通过 `co_await switch_to(looper_executor)` 切换到该上下文。
+- **默认调度器**: `SchedulerManager::get_default_scheduler()` 返回的默认调度器使用 `ThreadPoolExecutor`，适合大多数 CPU 密集型和通用任务。
+- **IO 隔离**: 如果有大量阻塞 IO 操作，建议创建一个独立的 `SimpleScheduler` 实例作为 IO 调度器，避免阻塞默认的计算线程池。
+- **线程亲和性**: 对于需要线程亲和性（如访问非线程安全资源或 UI 更新），可以使用 `LooperExecutor` 并通过 `co_await switch_to(looper_scheduler)` 切换到该上下文。你需要手动创建使用 `LooperExecutor` 的调度器。
 
 
 ## 4. 性能分析 (Profiling)

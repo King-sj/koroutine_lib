@@ -8,17 +8,17 @@
 
 `koroutine_lib` 提供了几种内置的 `Executor`：
 
-- **`NewThreadExecutor`**: 最简单粗暴的执行器。每次调用 `execute`，它都会创建一个全新的 `std::thread` 来运行任务，然后立即分离 (detach)。
-  - **优点**: 简单，任务之间完全隔离。
-  - **缺点**: 创建线程的开销很大，不适合大量、短小的任务。
+- **`ThreadPoolExecutor`**: 一个固定大小的线程池执行器。它维护一组工作线程和一个任务队列。
+  - **优点**: 高效利用系统资源，避免频繁创建销毁线程，适合高并发场景。
+  - **缺点**: 需要注意线程安全问题。
 
 - **`LooperExecutor`**: 该执行器内部维护一个独立的事件循环线程。所有提交给它的任务都会被放入一个队列中，由该线程按顺序执行。
   - **优点**: 保证任务在同一个线程上串行执行，非常适合需要线程亲和性的场景（如 UI 更新、访问非线程安全资源）。
   - **缺点**: 如果一个任务阻塞，会阻塞后续所有任务。
 
-- **`AsyncExecutor`**: 一个基于 `std::async` 的线程池执行器。它会将任务提交给 C++ 标准库的默认线程池去执行。
-  - **优点**: 重用线程，开销比 `NewThreadExecutor` 小，适合通用的计算密集型任务。
-  - **缺点**: 无法精细控制线程数量和行为。
+- **`NewThreadExecutor`**: 最简单粗暴的执行器。每次调用 `execute`，它都会创建一个全新的 `std::thread` 来运行任务，然后立即分离 (detach)。
+  - **优点**: 简单，任务之间完全隔离。
+  - **缺点**: 创建线程的开销很大，不适合大量、短小的任务。
 
 ## 2. `Scheduler`: 如何调度？
 
@@ -32,15 +32,19 @@
 
 ### `SchedulerManager`
 
-为了方便管理，`koroutine_lib` 提供了 `SchedulerManager`。这是一个全局服务，用于创建和访问预设的、覆盖大多数应用场景的调度器：
+`koroutine_lib` 提供了 `SchedulerManager` 来管理全局默认的调度器。
 
-- **计算调度器 (`Compute Scheduler`)**: 通常由一个 `AsyncExecutor` 或其他线程池支持，专为 CPU 密集型任务设计。
-- **I/O 调度器 (`IO Scheduler`)**: 可以是另一个独立的线程池，用于处理可能阻塞的网络或文件 I/O 操作。
+- **默认调度器**: 通过 `SchedulerManager::get_default_scheduler()` 获取。默认情况下，它是一个 `SimpleScheduler`，内部使用 `ThreadPoolExecutor`，线程数等于硬件并发数。
 
 ```cpp
-// 在程序启动时创建调度器
-auto compute_scheduler = SchedulerManager::create_compute_scheduler(4); // 4个线程
-auto io_scheduler = SchedulerManager::create_io_scheduler();
+// 获取默认调度器
+auto default_scheduler = SchedulerManager::get_default_scheduler();
+
+// 如果需要，你可以创建新的调度器（拥有独立的线程池）
+auto my_scheduler = std::make_shared<SimpleScheduler>();
+
+// 设置新的默认调度器
+SchedulerManager::set_default_scheduler(my_scheduler);
 ```
 
 ## 3. `co_await switch_to(scheduler)`: 在协程中切换上下文
@@ -53,25 +57,25 @@ auto io_scheduler = SchedulerManager::create_io_scheduler();
 3.  该 `Scheduler` 会在它管理的 `Executor` 上安排恢复操作。
 4.  当协程恢复时，它已经运行在新的线程上下文中了。
 
-### 示例：将 I/O 操作卸载到 I/O 线程
+### 示例：将 I/O 操作卸载到独立线程池
 
 假设我们有一个任务，它需要先在主线程上做一些计算，然后执行一个耗时的文件写入，最后再回到主线程更新状态。
 
 ```cpp
-Task<void> process_data_and_write_to_file(const std::string& data) {
-    // 当前在默认调度器上 (例如，主线程或计算线程池)
+Task<void> process_data_and_write_to_file(const std::string& data, std::shared_ptr<AbstractScheduler> io_scheduler) {
+    // 当前在默认调度器上
     std::cout << "1. 准备数据 on thread " << std::this_thread::get_id() << std::endl;
     auto processed_data = data + " [processed]";
 
     // 切换到 I/O 调度器来执行文件操作
-    co_await switch_to(SchedulerManager::get_io_scheduler());
+    co_await switch_to(io_scheduler);
 
     std::cout << "2. 写入文件 on thread " << std::this_thread::get_id() << std::endl;
     // 模拟耗时的文件写入
     co_await sleep_for(std::chrono::seconds(2));
     // std::ofstream file("output.txt"); file << processed_data;
 
-    // (可选) 切换回默认调度器
+    // 切换回默认调度器
     co_await switch_to(SchedulerManager::get_default_scheduler());
 
     std::cout << "3. 操作完成 on thread " << std::this_thread::get_id() << std::endl;
@@ -79,11 +83,10 @@ Task<void> process_data_and_write_to_file(const std::string& data) {
 }
 
 int main() {
-    // 设置调度器
-    SchedulerManager::create_compute_scheduler(1); // 默认调度器
-    SchedulerManager::create_io_scheduler();       // IO调度器
+    // 创建一个独立的调度器用于IO操作
+    auto io_scheduler = std::make_shared<SimpleScheduler>();
 
-    Runtime::block_on(process_data_and_write_to_file("my_data"));
+    Runtime::block_on(process_data_and_write_to_file("my_data", io_scheduler));
 }
 ```
 
@@ -91,7 +94,7 @@ int main() {
 ```
 1. 准备数据 on thread 0x10e9c7000
 2. 写入文件 on thread 0x16f5b3000  // <-- 线程 ID 变了！
-3. 操作完成 on thread 0x10e9c7000  // <-- 线程 ID 又变回来了！
+3. 操作完成 on thread 0x10e9c7000  // <-- 线程 ID 又变回来了（或者变成了默认调度器线程池中的另一个线程）！
 ```
 
 通过这种方式，你可以将不同性质的任务隔离在不同的线程池中，防止 I/O 操作阻塞计算任务，从而极大地提升应用的响应性和吞吐量。这是构建高性能服务器和复杂应用的基石。

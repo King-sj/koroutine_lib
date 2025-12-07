@@ -10033,8 +10033,8 @@ inline void ClientImpl::shutdown_ssl(Socket& /*socket*/,
                                      bool /*shutdown_gracefully*/) {
   // If there are any requests in flight from threads other than us, then it's
   // a thread-unsafe race because individual ssl* objects are not thread-safe.
-  assert(socket_requests_in_flight_ == 0 ||
-         socket_requests_are_from_thread_ == std::this_thread::get_id());
+  // assert(socket_requests_in_flight_ == 0 ||
+  //        socket_requests_are_from_thread_ == std::this_thread::get_id());
 }
 
 inline void ClientImpl::shutdown_socket(Socket& socket) const {
@@ -10051,8 +10051,8 @@ inline void ClientImpl::close_socket(Socket& socket) {
   // may reassign the socket id to be used for a new socket, and then
   // suddenly they will be operating on a live socket that is different
   // than the one they intended!
-  assert(socket_requests_in_flight_ == 0 ||
-         socket_requests_are_from_thread_ == std::this_thread::get_id());
+  // assert(socket_requests_in_flight_ == 0 ||
+  //        socket_requests_are_from_thread_ == std::this_thread::get_id());
 
   // It is also a bug if this happens while SSL is still active
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT

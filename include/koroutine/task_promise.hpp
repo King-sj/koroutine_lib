@@ -32,8 +32,24 @@ struct TaskPromiseBase {
 
   struct FinalAwaiter {
     bool detached;
+    std::coroutine_handle<> continuation;
+    std::weak_ptr<AbstractScheduler> scheduler;
+
     bool await_ready() const noexcept { return detached; }
-    void await_suspend(std::coroutine_handle<>) const noexcept {}
+
+    void await_suspend(std::coroutine_handle<>) const noexcept {
+      if (continuation) {
+        auto sched = scheduler.lock();
+        if (sched) {
+          ScheduleMetadata meta(ScheduleMetadata::Priority::Normal,
+                                "continuation_final");
+          sched->schedule(ScheduleRequest(continuation, std::move(meta)), 0);
+        } else {
+          continuation.resume();
+        }
+      }
+    }
+
     void await_resume() const noexcept {}
   };
 
@@ -50,7 +66,7 @@ struct TaskPromiseBase {
           "TaskPromise::final_suspend - task is not detached, will resume "
           "continuation if any");
     }
-    return FinalAwaiter{detached_};
+    return FinalAwaiter{detached_, continuation_, scheduler};
   }
 
   void set_detached(bool detached) { detached_ = detached; }
@@ -113,9 +129,6 @@ struct TaskPromiseBase {
       result = Result<ResultType>(std::current_exception());
       completion.notify_all();
     }
-
-    // 恢复 continuation
-    resume_continuation();
   }
 
   void set_scheduler(std::shared_ptr<AbstractScheduler> ex) { scheduler = ex; }
@@ -274,9 +287,6 @@ struct TaskPromise : TaskPromiseBase<ResultType, TaskPromise<ResultType>> {
       result = Result<ResultType>(std::move(value));
       completion.notify_all();
     }
-
-    // 恢复 continuation
-    Base::resume_continuation();
   }
 };
 
@@ -296,9 +306,6 @@ struct TaskPromise<void> : TaskPromiseBase<void, TaskPromise<void>> {
       result = Result<void>();
       completion.notify_all();
     }
-
-    // 恢复 continuation
-    Base::resume_continuation();
   }
 };
 

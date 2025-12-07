@@ -20,7 +20,7 @@
 
 - 🚀 **现代 C++ 设计**: 完全基于 C++23 协程，拥抱最新标准。
 - ⚡ **强大的执行模型**:
-  - **Executors**: 内置多种执行器，如 `NewThreadExecutor`、`LooperExecutor` (事件循环) 和 `AsyncExecutor` (线程池)。
+  - **Executors**: 内置多种执行器，如 `ThreadPoolExecutor` (默认多线程池)、`LooperExecutor` (单线程事件循环) 和 `NewThreadExecutor`。
   - **Schedulers**: 抽象调度层，可实现自定义任务调度逻辑（如优先级、时间轮）。
 - 🔗 **结构化并发**:
   - 使用 `when_all` 和 `when_any` 轻松组合和并发执行多个任务。
@@ -66,7 +66,6 @@ manager.sync_wait_group("group1");
 
 ```cpp
 #include "koroutine/koroutine.h"
-#include "koroutine/executors/async_executor.h"
 #include <iostream>
 
 // 模拟一个耗时的下载任务
