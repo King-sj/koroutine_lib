@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <fcntl.h>
 #include <fstream>
 #include <memory>
 #include <string>

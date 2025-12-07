@@ -3,6 +3,7 @@
 // 平台相关的头文件
 #ifdef _WIN32
 #include <io.h>
+#include <fcntl.h>
 #include <windows.h>
 #else
 #include <fcntl.h>

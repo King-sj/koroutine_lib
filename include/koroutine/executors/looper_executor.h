@@ -35,6 +35,9 @@ class LooperExecutor : public AbstractExecutor {
   std::atomic<bool> is_active_{true};
   std::thread worker_;
 
+  inline bool has_pending_tasks() {
+    return !tasks_.empty() || !delayed_tasks_.empty();
+  }
   void run_loop() {
     while (is_active_ || !tasks_.empty() || !delayed_tasks_.empty()) {
       LOG_TRACE("LooperExecutor::run_loop - waiting for tasks");
@@ -57,7 +60,9 @@ class LooperExecutor : public AbstractExecutor {
               "ready");
           //   TODO: 如果在等待期间有新任务到来，应该提前唤醒
           cv_.wait_for(lock, wait_time,
-                       [this] { return !tasks_.empty() || !is_active_; });
+                       [this] {
+                        return has_pending_tasks() || !is_active_;
+            });
         }
       }
 

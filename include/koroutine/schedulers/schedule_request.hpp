@@ -48,7 +48,7 @@ class ScheduleRequest {
    * @param handle 要调度的协程句柄
    * @param meta 调度元数据（默认为普通优先级）
    */
-  explicit ScheduleRequest(std::coroutine_handle<> handle,
+  ScheduleRequest(std::coroutine_handle<> handle,
                            ScheduleMetadata meta = {})
       : handle_(handle), metadata_(std::move(meta)) {}
 
