@@ -101,15 +101,17 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
       op->wsa_buf.buf = static_cast<char*>(op->buffer);
       op->wsa_buf.len = static_cast<ULONG>(op->size);
       op->flags = 0;
-      result = WSARecv(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
-                       &op->overlapped, NULL);
+      int res = WSARecv(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
+                        &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
       break;
     }
     case OpType::WRITE: {
       op->wsa_buf.buf = static_cast<char*>(op->buffer);
       op->wsa_buf.len = static_cast<ULONG>(op->size);
-      result = WSASend(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
-                       &op->overlapped, NULL);
+      int res = WSASend(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
+                        &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
       break;
     }
     case OpType::ACCEPT: {
@@ -171,6 +173,26 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
 
       result = lpConnectEx(fd, name, namelen, NULL, 0, &bytes_transferred,
                            &op->overlapped);
+      break;
+    }
+    case OpType::RECVFROM: {
+      op->wsa_buf.buf = static_cast<char*>(op->buffer);
+      op->wsa_buf.len = static_cast<ULONG>(op->size);
+      op->flags = 0;
+      op->addr_len = sizeof(op->addr);
+      int res = WSARecvFrom(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
+                            (struct sockaddr*)&op->addr, &op->addr_len,
+                            &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
+      break;
+    }
+    case OpType::SENDTO: {
+      op->wsa_buf.buf = static_cast<char*>(op->buffer);
+      op->wsa_buf.len = static_cast<ULONG>(op->size);
+      int res = WSASendTo(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
+                          (const struct sockaddr*)&op->addr, op->addr_len,
+                          &op->overlapped, NULL);
+      result = (res == 0) ? TRUE : FALSE;
       break;
     }
     case OpType::CLOSE: {
