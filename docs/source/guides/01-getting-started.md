@@ -8,6 +8,8 @@
   - GCC 11+
   - Clang 14+
   - MSVC 19.29+ (Visual Studio 2022)
+- **依赖库**:
+  - **Linux**: `liburing` (用于异步 I/O)
 - **构建系统**: CMake 3.20+
 - **Python**: 用于文档生成 (可选)。
 

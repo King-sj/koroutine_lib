@@ -52,10 +52,12 @@ nav:
     - '结构化并发': 'guides/04-structured-concurrency.md'
     - '通道 (Channel)': 'guides/05-channels.md'
     - '异步 I/O': 'guides/06-async-io.md'
+    - 'HTTP 模块': 'http.md'
     - '集成 & 打包': 'guides/07-integration.md'
     - '最佳实践': 'guides/08-best-practices.md'
     - 'API 概览': 'api_overview.md'
   - '开发者贡献':
     - '欢迎参与贡献': 'contributing/index.md'
     - '核心架构': 'contributing/architecture.md'
+    - 'Tools': 'contributing/tools.md'
   - '源码 (GitHub)': 'https://github.com/king-sj/koroutine_lib/'
