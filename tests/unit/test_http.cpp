@@ -22,6 +22,7 @@ class HttpTest : public ::testing::Test {
 
   void TearDown() override {
     // Teardown code if needed
+    std::cout << "HttpTest::TearDown" << std::endl;
   }
 
   // Helper to generate random string
@@ -58,51 +59,52 @@ TEST_F(HttpTest, BasicGetPost) {
       co_return;
     });
 
-    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<int> {
+    std::cout << "About to spawn server task" << std::endl;
+    auto server_task = [](std::shared_ptr<Server> svr, int port) -> Task<void> {
+      std::cout << "Inside spawned task lambda" << std::endl;
       try {
+        std::cout << "Starting server listen" << std::endl;
         bool ret = co_await svr->listen_async("127.0.0.1", port);
+        std::cout << "Server listen returned: " << ret << std::endl;
       } catch (const std::exception& e) {
         std::cout << "Server listen threw exception: " << e.what() << std::endl;
       } catch (...) {
         std::cout << "Server listen threw unknown exception" << std::endl;
       }
-      co_return 0;
     };
+    koroutine::Runtime::spawn(server_task(svr, port));
 
-    auto client_task = [](std::shared_ptr<Server> svr, int port) -> Task<int> {
-        co_await koroutine::SleepAwaiter(100);
+    std::cout << "Spawned server task" << std::endl;
 
-        EXPECT_EQ(svr->bind_port(), port);
+    std::cout << "Waiting for server startup" << std::endl;
+    co_await koroutine::SleepAwaiter(100);
 
-        Client cli("http://127.0.0.1:" + std::to_string(port));
+    EXPECT_EQ(svr->bind_port(), port);
 
-        // Test GET
-        auto res = co_await cli.Get("/hi");
-        if (!res) {
-            std::cout << "GET /hi failed. Error: " << res.error() << std::endl;
-        }
-        EXPECT_TRUE(res);
-        if (res) {
-          EXPECT_EQ(res->status, 200);
-          EXPECT_EQ(res->body, "Hello World!");
-        }
+    Client cli("http://127.0.0.1:" + std::to_string(port));
 
-        // Test POST
-        auto res_post = co_await cli.Post("/echo", "test body", "text/plain");
-        if (!res_post) {
-            std::cout << "POST /echo failed. Error: " << res_post.error() << std::endl;
-        }
-        EXPECT_TRUE(res_post);
-        if (res_post) {
-          EXPECT_EQ(res_post->status, 200);
-          EXPECT_EQ(res_post->body, "test body");
-        }
+    // Test GET
+    std::cout << "Sending GET /hi" << std::endl;
+    auto res = co_await cli.Get("/hi");
+    std::cout << "GET /hi returned" << std::endl;
+    EXPECT_TRUE(res);
+    if (res) {
+      EXPECT_EQ(res->status, 200);
+      EXPECT_EQ(res->body, "Hello World!");
+    }
 
-        svr->stop();
-        co_return 0;
-    };
+    // Test POST
+    std::cout << "Sending POST /echo" << std::endl;
+    auto res_post = co_await cli.Post("/echo", "test body", "text/plain");
+    std::cout << "POST /echo returned" << std::endl;
+    EXPECT_TRUE(res_post);
+    if (res_post) {
+      EXPECT_EQ(res_post->status, 200);
+      EXPECT_EQ(res_post->body, "test body");
+    }
 
-    co_await when_all(server_task(svr, port), client_task(svr, port));
+    std::cout << "Stopping server" << std::endl;
+    svr->stop();
   };
 
   Runtime::block_on(test_task());

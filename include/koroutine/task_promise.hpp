@@ -182,6 +182,8 @@ struct TaskPromiseBase {
               "TaskPromise - cancellation: no scheduler available to resume "
               "continuation");
           // 不再直接 resume，必须有调度器
+          throw std::runtime_error(
+              "No scheduler available to resume continuation on cancellation");
         }
       }
     });

@@ -1,6 +1,7 @@
 #include "koroutine/async_io/resolver.h"
 
 #include <cstring>
+#include <mutex>
 #include <system_error>
 #include <thread>
 
@@ -20,16 +21,39 @@
 
 namespace koroutine::async_io {
 
+#ifdef _WIN32
+static void ensure_winsock_init() {
+  static std::once_flag flag;
+  std::call_once(flag, []() {
+    WSADATA wsaData;
+    int res = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (res != 0) {
+      LOG_ERROR("WSAStartup failed: ", res);
+    } else {
+      LOG_INFO("WSAStartup succeeded");
+    }
+  });
+}
+#endif
+
 struct ResolveAwaiter
     : public AwaiterBase<std::expected<std::vector<Endpoint>, int>> {
   std::string host;
   std::string service;
 
   ResolveAwaiter(std::string h, std::string s)
-      : host(std::move(h)), service(std::move(s)) {}
+      : host(std::move(h)), service(std::move(s)) {
+    LOG_TRACE("ResolveAwaiter::constructor - host: ", host,
+              " service: ", service);
+  }
 
  protected:
   void after_suspend() override {
+    LOG_TRACE("ResolveAwaiter::after_suspend - starting resolution for host: ",
+              host, " service: ", service);
+#ifdef _WIN32
+    ensure_winsock_init();
+#endif
     // TODO: Use NewThreadExecutor to run blocking getaddrinfo
     // In a real system, we might use a thread pool
     static auto executor = std::make_shared<NewThreadExecutor>();

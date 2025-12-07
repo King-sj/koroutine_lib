@@ -8452,22 +8452,27 @@ inline void Server::wait_until_ready() const {
 }
 
 inline void Server::stop() {
+  LOG_INFO("Server::stop called");
   if (is_running_.exchange(false)) {
     assert(svr_sock_ != INVALID_SOCKET);
+    LOG_INFO("Server::stop - cancelling group");
     task_manager_.cancel_group("http_connections");
 
     if (server_socket_) {
+      LOG_INFO("Server::stop - closing server socket via engine");
       auto engine = server_socket_->get_engine();
       auto op = std::make_shared<koroutine::async_io::AsyncIOOp>(
           koroutine::async_io::OpType::CLOSE, server_socket_, nullptr, 0);
       engine->submit(op);
     } else {
+      LOG_INFO("Server::stop - closing server socket manually");
       std::atomic<socket_t> sock(svr_sock_.exchange(INVALID_SOCKET));
       detail::shutdown_socket(sock);
       detail::close_socket(sock);
     }
 
     {
+      LOG_INFO("Server::stop - cancelling clients");
       std::lock_guard lock(clients_mtx_);
       for (auto& weak_client : clients_) {
         if (auto client = weak_client.lock()) {
@@ -8478,6 +8483,7 @@ inline void Server::stop() {
     }
   }
   is_decommissioned = false;
+  LOG_INFO("Server::stop finished");
 }
 
 inline void Server::decommission() { is_decommissioned = true; }
@@ -9118,7 +9124,9 @@ inline koroutine::Task<bool> Server::listen_async(const std::string& host,
     LOG_WARN("Server listen loop interrupted by unknown exception");
   }
   LOG_INFO("Server stopping...");
+  LOG_INFO("Server calling task_manager_.shutdown()");
   co_await task_manager_.shutdown();
+  LOG_INFO("Server task_manager_.shutdown() returned");
   LOG_INFO("Server stopped");
   is_running_ = false;
   co_return true;
@@ -9841,27 +9849,31 @@ inline koroutine::Task<bool> ClientImpl::create_and_connect_socket(
 #ifdef _WIN32
         // Windows IOCP ConnectEx logic
         {
-            struct sockaddr_storage bind_addr = {};
-            bind_addr.ss_family = ep.family();
-            if (::bind(sock, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) == 0) {
-                auto engine = koroutine::async_io::get_default_io_engine();
-                auto async_sock = std::make_shared<koroutine::async_io::AsyncSocket>(engine, sock);
-                auto op = std::make_shared<koroutine::async_io::AsyncIOOp>(
-                    koroutine::async_io::OpType::CONNECT,
-                    async_sock->shared_from_this(), nullptr, 0);
+          struct sockaddr_storage bind_addr = {};
+          bind_addr.ss_family = ep.family();
+          if (::bind(sock, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) ==
+              0) {
+            auto engine = koroutine::async_io::get_default_io_engine();
+            auto async_sock =
+                std::make_shared<koroutine::async_io::AsyncSocket>(engine,
+                                                                   sock);
+            auto op = std::make_shared<koroutine::async_io::AsyncIOOp>(
+                koroutine::async_io::OpType::CONNECT,
+                async_sock->shared_from_this(), nullptr, 0);
 
-                memcpy(&op->addr, ep.data(), ep.length());
-                op->addr_len = ep.length();
+            memcpy(&op->addr, ep.data(), ep.length());
+            op->addr_len = ep.length();
 
-                co_await koroutine::async_io::IOAwaiter<void>{op};
+            co_await koroutine::async_io::IOAwaiter<void>{op};
 
-                if (!op->error) {
-                    setsockopt(sock, SOL_SOCKET, 0x7010 /*SO_UPDATE_CONNECT_CONTEXT*/, NULL, 0);
-                    socket.sock = async_sock;
-                    LOG_DEBUG("AsyncSocket created via async connect (ConnectEx)");
-                    co_return true;
-                }
+            if (!op->error) {
+              setsockopt(sock, SOL_SOCKET, 0x7010 /*SO_UPDATE_CONNECT_CONTEXT*/,
+                         NULL, 0);
+              socket.sock = async_sock;
+              LOG_DEBUG("AsyncSocket created via async connect (ConnectEx)");
+              co_return true;
             }
+          }
         }
 #else
         detail::set_nonblocking(sock, true);
@@ -10176,7 +10188,16 @@ inline koroutine::Task<Result> ClientImpl::send_(Request req) {
   LOG_DEBUG("ClientImpl::send_ (wrapper) start");
   auto res = detail::make_unique<Response>();
   auto error = Error::Success;
-  auto ret = co_await send(req, *res, error);
+  bool ret = false;
+  try {
+    ret = co_await send(req, *res, error);
+  } catch (const std::exception& e) {
+    LOG_ERROR("ClientImpl::send_ (wrapper) caught exception: {}", e.what());
+    error = Error::Connection;
+  } catch (...) {
+    LOG_ERROR("ClientImpl::send_ (wrapper) caught unknown exception");
+    error = Error::Unknown;
+  }
   LOG_DEBUG("ClientImpl::send_ (wrapper) send returned: {}", ret);
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   co_return Result{ret ? std::move(res) : nullptr, error,
@@ -11112,7 +11133,10 @@ ClientImpl::send_with_content_provider_and_receiver(
 
   auto res = detail::make_unique<Response>();
   auto ret = co_await send(req, *res, error);
-  LOG_DEBUG("ClientImpl::send_with_content_provider_and_receiver (inner) send returned: {}", ret);
+  LOG_DEBUG(
+      "ClientImpl::send_with_content_provider_and_receiver (inner) send "
+      "returned: {}",
+      ret);
   co_return ret ? std::move(res) : nullptr;
 }
 
@@ -11139,7 +11163,10 @@ ClientImpl::send_with_content_provider_and_receiver(
       std::move(content_provider_without_length), content_type,
       std::move(content_receiver), error);
 
-  LOG_DEBUG("ClientImpl::send_with_content_provider_and_receiver (outer) res is null: {}", res == nullptr);
+  LOG_DEBUG(
+      "ClientImpl::send_with_content_provider_and_receiver (outer) res is "
+      "null: {}",
+      res == nullptr);
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   co_return Result{std::move(res), error, std::move(req.headers),
@@ -13488,6 +13515,7 @@ inline koroutine::Task<Result> Client::Post(std::string path,
                                             const std::string& body,
                                             const std::string& content_type,
                                             UploadProgress progress) {
+  LOG_INFO("Client::Post called for path: ", path);
   co_return co_await cli_->Post(path, body, content_type, progress);
 }
 inline koroutine::Task<Result> Client::Post(std::string path,

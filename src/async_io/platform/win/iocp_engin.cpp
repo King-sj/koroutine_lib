@@ -70,7 +70,7 @@ IOCPIOEngine::~IOCPIOEngine() {
 void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
   if (!running_) {
     op->error = std::make_error_code(std::errc::operation_canceled);
-    op->scheduler->schedule(op->coro_handle);
+    op->complete();
     return;
   }
 
@@ -95,6 +95,11 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
   DWORD bytes_transferred = 0;
   int result = 0;
   DWORD flags = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(ops_mutex_);
+    in_flight_ops_[&op->overlapped] = op;
+  }
 
   switch (op->type) {
     case OpType::READ: {
@@ -138,7 +143,7 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
     case OpType::ACCEPT: {
       if (!lpAcceptEx || !lpGetAcceptExSockaddrs) {
         op->error = std::make_error_code(std::errc::function_not_supported);
-        op->scheduler->schedule(op->coro_handle);
+        op->complete();
         return;
       }
 
@@ -156,7 +161,7 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
       op->accept_sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
       if (op->accept_sock == INVALID_SOCKET) {
         op->error = std::make_error_code(std::errc::io_error);
-        op->scheduler->schedule(op->coro_handle);
+        op->complete();
         return;
       }
 
@@ -175,7 +180,7 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
     case OpType::CONNECT: {
       if (!lpConnectEx) {
         op->error = std::make_error_code(std::errc::function_not_supported);
-        op->scheduler->schedule(op->coro_handle);
+        op->complete();
         return;
       }
 
@@ -223,13 +228,15 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
       // completion for close (unless we use DisconnectEx?)
       // But AsyncIOOp expects a completion.
       // We can PostQueuedCompletionStatus to simulate completion.
-      PostQueuedCompletionStatus(iocp_handle_, 0, (ULONG_PTR)fd,
-                                 &op->overlapped);
+      if (op->coro_handle) {
+        PostQueuedCompletionStatus(iocp_handle_, 0, (ULONG_PTR)fd,
+                                   &op->overlapped);
+      }
       return;
     }
     default:
       op->error = std::make_error_code(std::errc::operation_not_supported);
-      op->scheduler->schedule(op->coro_handle);
+      op->complete();
       return;
   }
 
@@ -237,8 +244,12 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
     int error = WSAGetLastError();
     if (error != ERROR_IO_PENDING) {
       LOG_ERROR("IOCP submit failed: ", error);
+      {
+        std::lock_guard<std::mutex> lock(ops_mutex_);
+        in_flight_ops_.erase(&op->overlapped);
+      }
       op->error = std::make_error_code(std::errc::io_error);
-      op->scheduler->schedule(op->coro_handle);
+      op->complete();
     }
   }
 }
@@ -264,16 +275,22 @@ void IOCPIOEngine::run() {
       continue;
     }
 
-    // Retrieve AsyncIOOp from OVERLAPPED
-    // Since overlapped is a member of AsyncIOOp, we can cast.
-    // But we need to be careful about offset.
-    // AsyncIOOp* op = CONTAINING_RECORD(overlapped, AsyncIOOp, overlapped);
-    // Since we don't have CONTAINING_RECORD available easily without windows
-    // headers macros which might conflict, let's calculate manually or assume
-    // standard layout.
-    // Actually, offsetof is standard.
-    AsyncIOOp* op = reinterpret_cast<AsyncIOOp*>(
-        reinterpret_cast<char*>(overlapped) - offsetof(AsyncIOOp, overlapped));
+    std::shared_ptr<AsyncIOOp> op_ptr;
+    {
+      std::lock_guard<std::mutex> lock(ops_mutex_);
+      auto it = in_flight_ops_.find(overlapped);
+      if (it != in_flight_ops_.end()) {
+        op_ptr = it->second;
+        in_flight_ops_.erase(it);
+      }
+    }
+
+    if (!op_ptr) {
+      // Operation might have been cancelled or not found
+      continue;
+    }
+
+    AsyncIOOp* op = op_ptr.get();
 
     if (result == FALSE) {
       // IO failed
@@ -315,9 +332,7 @@ void IOCPIOEngine::run() {
     }
 
     // Resume coroutine
-    if (op->scheduler && op->coro_handle) {
-      op->scheduler->schedule(op->coro_handle);
-    }
+    op->complete();
   }
 }
 
@@ -326,6 +341,14 @@ void IOCPIOEngine::stop() {
   if (iocp_handle_) {
     PostQueuedCompletionStatus(iocp_handle_, 0, 0, NULL);
   }
+
+  // Cancel all pending operations
+  std::lock_guard<std::mutex> lock(ops_mutex_);
+  for (auto& [key, op] : in_flight_ops_) {
+    op->error = std::make_error_code(std::errc::operation_canceled);
+    op->complete();
+  }
+  in_flight_ops_.clear();
 }
 
 bool IOCPIOEngine::is_running() { return running_; }

@@ -68,8 +68,16 @@ struct Result : ResultBase<T, Result<T>> {
   T get_or_throw() {
     LOG_TRACE("Result::get_or_throw - checking for exception");
     if (this->_exception_ptr) {
-      LOG_ERROR("Result::get_or_throw - throwing stored exception");
-      std::rethrow_exception(this->_exception_ptr);
+      try {
+        std::rethrow_exception(this->_exception_ptr);
+      } catch (const std::exception& e) {
+        LOG_ERROR("Result::get_or_throw - throwing stored exception: ",
+                  e.what());
+        throw;
+      } catch (...) {
+        LOG_ERROR("Result::get_or_throw - throwing stored unknown exception");
+        throw;
+      }
     }
     LOG_TRACE("Result::get_or_throw - returning std::move(_value)");
     return std::move(_value);
