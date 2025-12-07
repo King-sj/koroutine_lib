@@ -41,23 +41,15 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - attr_list
+  - md_in_html
 
-nav:
-  - '主页': 'index.md'
-  - '使用指南':
-    - '核心设计': 'design.md'
-    - '快速上手': 'guides/01-getting-started.md'
-    - 'Task 与 Generator': 'guides/02-tasks-and-generators.md'
-    - '执行器与调度器': 'guides/03-executors-and-schedulers.md'
-    - '结构化并发': 'guides/04-structured-concurrency.md'
-    - '通道 (Channel)': 'guides/05-channels.md'
-    - '异步 I/O': 'guides/06-async-io.md'
-    - 'HTTP 模块': 'http.md'
-    - '集成 & 打包': 'guides/07-integration.md'
-    - '最佳实践': 'guides/08-best-practices.md'
-    - 'API 概览': 'api_overview.md'
-  - '开发者贡献':
-    - '欢迎参与贡献': 'contributing/index.md'
-    - '核心架构': 'contributing/architecture.md'
-    - 'Tools': 'contributing/tools.md'
-  - '源码 (GitHub)': 'https://github.com/king-sj/koroutine_lib/'
+# Nav is removed to allow auto-discovery of documentation structure.
+# Files are organized in folders (guides/, contributing/) with numeric prefixes where ordering matters.
+# nav:
+#   - '主页': 'index.md'
+#   - ...
+
