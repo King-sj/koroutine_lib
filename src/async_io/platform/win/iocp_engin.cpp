@@ -98,20 +98,41 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
 
   switch (op->type) {
     case OpType::READ: {
-      op->wsa_buf.buf = static_cast<char*>(op->buffer);
-      op->wsa_buf.len = static_cast<ULONG>(op->size);
-      op->flags = 0;
-      int res = WSARecv(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
-                        &op->overlapped, NULL);
-      result = (res == 0) ? TRUE : FALSE;
+      if (op->io_object->type() == IOObjectType::File) {
+        int res = ReadFile((HANDLE)fd, op->buffer, static_cast<DWORD>(op->size),
+                           &bytes_transferred, &op->overlapped);
+        if (res) {
+          result = TRUE;
+        } else {
+          result = (GetLastError() == ERROR_IO_PENDING) ? TRUE : FALSE;
+        }
+      } else {
+        op->wsa_buf.buf = static_cast<char*>(op->buffer);
+        op->wsa_buf.len = static_cast<ULONG>(op->size);
+        op->flags = 0;
+        int res = WSARecv(fd, &op->wsa_buf, 1, &bytes_transferred, &op->flags,
+                          &op->overlapped, NULL);
+        result = (res == 0) ? TRUE : FALSE;
+      }
       break;
     }
     case OpType::WRITE: {
-      op->wsa_buf.buf = static_cast<char*>(op->buffer);
-      op->wsa_buf.len = static_cast<ULONG>(op->size);
-      int res = WSASend(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
-                        &op->overlapped, NULL);
-      result = (res == 0) ? TRUE : FALSE;
+      if (op->io_object->type() == IOObjectType::File) {
+        int res =
+            WriteFile((HANDLE)fd, op->buffer, static_cast<DWORD>(op->size),
+                      &bytes_transferred, &op->overlapped);
+        if (res) {
+          result = TRUE;
+        } else {
+          result = (GetLastError() == ERROR_IO_PENDING) ? TRUE : FALSE;
+        }
+      } else {
+        op->wsa_buf.buf = static_cast<char*>(op->buffer);
+        op->wsa_buf.len = static_cast<ULONG>(op->size);
+        int res = WSASend(fd, &op->wsa_buf, 1, &bytes_transferred, 0,
+                          &op->overlapped, NULL);
+        result = (res == 0) ? TRUE : FALSE;
+      }
       break;
     }
     case OpType::ACCEPT: {
@@ -190,7 +211,11 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
     case OpType::CLOSE: {
       // Just close the socket.
       // This will cancel pending IOs.
-      closesocket(fd);
+      if (op->io_object->type() == IOObjectType::File) {
+        CloseHandle((HANDLE)fd);
+      } else {
+        closesocket(fd);
+      }
       // We should schedule the coroutine immediately as there's no async
       // completion for close (unless we use DisconnectEx?)
       // But AsyncIOOp expects a completion.

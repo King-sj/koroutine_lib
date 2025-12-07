@@ -36,6 +36,7 @@ class AsyncSocket : public AsyncIOObject,
   void cancel();
 
   intptr_t native_handle() const override { return sockfd_; }
+  IOObjectType type() const override { return IOObjectType::Socket; }
 
   // New features
   Endpoint local_endpoint() const;
@@ -112,6 +113,7 @@ class AsyncServerSocket
   Task<size_t> write(const void*, size_t) override;
   Task<void> close() override;
   intptr_t native_handle() const override { return sockfd_; }
+  IOObjectType type() const override { return IOObjectType::Socket; }
 
   Endpoint local_endpoint() const;
 
@@ -186,6 +188,7 @@ class AsyncUDPSocket : public AsyncIOObject,
   Task<size_t> write(const void* buf, size_t size) override;
   Task<void> close() override;
   intptr_t native_handle() const override { return sockfd_; }
+  IOObjectType type() const override { return IOObjectType::Socket; }
 
   Endpoint local_endpoint() const;
   Endpoint remote_endpoint() const;

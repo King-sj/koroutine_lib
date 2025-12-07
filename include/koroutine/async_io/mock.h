@@ -34,5 +34,6 @@ class MockAsyncIOObject : public AsyncIOObject {
   }
 
   intptr_t native_handle() const override { return 0; }
+  IOObjectType type() const override { return IOObjectType::Other; }
 };
 }  // namespace koroutine::async_io
