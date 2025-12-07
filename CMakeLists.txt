@@ -31,6 +31,8 @@ endif()
 # Add google testing framework
 include(FetchContent)
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://gitee.com/mirrors/googletest.git
@@ -62,7 +64,7 @@ install(TARGETS koroutinelib_static koroutinelib_shared
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/include/koroutine
-    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/generate_single_header.py ${CMAKE_SOURCE_DIR}/include/koroutine ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
+    COMMAND ${CMAKE_COMMAND} -E env "${Python3_EXECUTABLE}" ${CMAKE_SOURCE_DIR}/scripts/generate_single_header.py ${CMAKE_SOURCE_DIR}/include/koroutine ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
     DEPENDS ${CMAKE_SOURCE_DIR}/include/koroutine/*.hpp ${CMAKE_SOURCE_DIR}/scripts/generate_single_header.py
     COMMENT "Generating single header file koroutine.hpp (inlining project headers)"
 )

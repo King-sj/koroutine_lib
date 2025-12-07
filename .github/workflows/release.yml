@@ -44,19 +44,32 @@ jobs:
         run: cmake --build build --target koroutine_single_header --config Release
 
       - name: Build
-        run: cmake --build build --config Release -- -j
+        run: cmake --build build --config Release -j
 
       - name: Package artifacts (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           mkdir -p artifacts
-          ZIP=artifacts/koroutine-${{ matrix.os }}.zip
+          ZIP=$(pwd)/artifacts/koroutine-${{ matrix.os }}.zip
+          mkdir -p stage
+
           if [ -d build/lib ]; then
-            zip -r "$ZIP" build/lib || true
+            mkdir -p stage/lib
+            cp -r build/lib/* stage/lib/
           fi
+
+          if [ -d include ]; then
+            cp -r include stage/
+          fi
+
           if [ -f build/include/koroutine/koroutine.hpp ]; then
-            zip -u "$ZIP" build/include/koroutine/koroutine.hpp || true
+            mkdir -p stage/single_header
+            cp build/include/koroutine/koroutine.hpp stage/single_header/
           fi
+
+          cd stage
+          zip -r "$ZIP" .
+          cd ..
           ls -lh artifacts
 
       - name: Package artifacts (Windows)
@@ -65,10 +78,24 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $zip = "artifacts/koroutine-${{ matrix.os }}.zip"
-          $outFiles = @()
-          if (Test-Path -Path "build\lib") { $outFiles += Get-ChildItem -Path build\lib -Recurse | Select-Object -ExpandProperty FullName }
-          if (Test-Path -Path "build\include\koroutine\koroutine.hpp") { $outFiles += (Resolve-Path build\include\koroutine\koroutine.hpp).Path }
-          if ($outFiles.Count -gt 0) { Compress-Archive -Path $outFiles -DestinationPath $zip -Force }
+          $stage = "stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          if (Test-Path -Path "build\lib") {
+            New-Item -ItemType Directory -Force -Path "$stage\lib" | Out-Null
+            Copy-Item -Path "build\lib\*" -Destination "$stage\lib" -Recurse
+          }
+
+          if (Test-Path -Path "include") {
+             Copy-Item -Path "include" -Destination "$stage" -Recurse
+          }
+
+          if (Test-Path -Path "build\include\koroutine\koroutine.hpp") {
+             New-Item -ItemType Directory -Force -Path "$stage\single_header" | Out-Null
+             Copy-Item -Path "build\include\koroutine\koroutine.hpp" -Destination "$stage\single_header"
+          }
+
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
           Get-ChildItem artifacts | Format-List
 
       - name: Upload build artifact
