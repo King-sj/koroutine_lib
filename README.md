@@ -67,7 +67,7 @@
 | **Node.js** | Runtime | ~10,000 - 15,000 | V8 引擎, 事件驱动 |
 | **Python (FastAPI)** | Web Framework | ~5,000 - 10,000 | 优秀的异步 Python 框架 |
 
-*注：Nginx 数据为本机 (Apple M4) 实测值，配置为 `worker_processes 1`，响应 "Hello World!"。其他数据为行业典型参考值。*
+*注：Nginx 数据为本机 (Apple M4) 实测值，配置为 `worker_processes auto`，响应 "Hello World!"。其他数据为行业典型参考值。*
 
 ## 🔮 未来改进路线
 

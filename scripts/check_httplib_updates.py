@@ -24,6 +24,9 @@ def get_new_commits(repo_path, last_commit, current_commit):
         return []
 
 def main():
+    if os.environ.get("CI"):
+        return
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_path = os.path.abspath(os.path.join(script_dir, HTTPLIB_REL_PATH))
     state_file_path = os.path.join(script_dir, STATE_FILE)
