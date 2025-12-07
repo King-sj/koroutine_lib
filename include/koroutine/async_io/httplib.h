@@ -8452,7 +8452,7 @@ inline void Server::wait_until_ready() const {
 }
 
 inline void Server::stop() {
-  if (is_running_) {
+  if (is_running_.exchange(false)) {
     assert(svr_sock_ != INVALID_SOCKET);
     task_manager_.cancel_group("http_connections");
 
@@ -9838,6 +9838,32 @@ inline koroutine::Task<bool> ClientImpl::create_and_connect_socket(
           detail::set_ipv6_v6only(sock, true);
         }
 
+#ifdef _WIN32
+        // Windows IOCP ConnectEx logic
+        {
+            struct sockaddr_storage bind_addr = {};
+            bind_addr.ss_family = ep.family();
+            if (::bind(sock, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) == 0) {
+                auto engine = koroutine::async_io::get_default_io_engine();
+                auto async_sock = std::make_shared<koroutine::async_io::AsyncSocket>(engine, sock);
+                auto op = std::make_shared<koroutine::async_io::AsyncIOOp>(
+                    koroutine::async_io::OpType::CONNECT,
+                    async_sock->shared_from_this(), nullptr, 0);
+
+                memcpy(&op->addr, ep.data(), ep.length());
+                op->addr_len = ep.length();
+
+                co_await koroutine::async_io::IOAwaiter<void>{op};
+
+                if (!op->error) {
+                    setsockopt(sock, SOL_SOCKET, 0x7010 /*SO_UPDATE_CONNECT_CONTEXT*/, NULL, 0);
+                    socket.sock = async_sock;
+                    LOG_DEBUG("AsyncSocket created via async connect (ConnectEx)");
+                    co_return true;
+                }
+            }
+        }
+#else
         detail::set_nonblocking(sock, true);
 
         int ret = ::connect(sock, ep.data(), ep.length());
@@ -9846,11 +9872,7 @@ inline koroutine::Task<bool> ClientImpl::create_and_connect_socket(
         if (ret == 0) {
           connected = true;
         } else {
-#ifdef _WIN32
-          if (WSAGetLastError() == WSAEWOULDBLOCK) {
-#else
           if (errno == EINPROGRESS) {
-#endif
             auto engine = koroutine::async_io::get_default_io_engine();
             auto async_sock =
                 std::make_shared<koroutine::async_io::AsyncSocket>(engine,
@@ -9885,6 +9907,7 @@ inline koroutine::Task<bool> ClientImpl::create_and_connect_socket(
           LOG_DEBUG("AsyncSocket created via immediate connect");
           co_return true;
         }
+#endif
       } catch (const std::exception& e) {
         LOG_DEBUG("Connect attempt failed: {}", e.what());
       } catch (...) {
@@ -11088,7 +11111,9 @@ ClientImpl::send_with_content_provider_and_receiver(
   }
 
   auto res = detail::make_unique<Response>();
-  co_return (co_await send(req, *res, error)) ? std::move(res) : nullptr;
+  auto ret = co_await send(req, *res, error);
+  LOG_DEBUG("ClientImpl::send_with_content_provider_and_receiver (inner) send returned: {}", ret);
+  co_return ret ? std::move(res) : nullptr;
 }
 
 inline koroutine::Task<Result>
@@ -11113,6 +11138,8 @@ ClientImpl::send_with_content_provider_and_receiver(
       req, body, content_length, std::move(content_provider),
       std::move(content_provider_without_length), content_type,
       std::move(content_receiver), error);
+
+  LOG_DEBUG("ClientImpl::send_with_content_provider_and_receiver (outer) res is null: {}", res == nullptr);
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
   co_return Result{std::move(res), error, std::move(req.headers),

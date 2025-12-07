@@ -144,13 +144,16 @@ void IOCPIOEngine::submit(std::shared_ptr<AsyncIOOp> op) {
 
       // Create a new socket for the connection
       // We need to know the family/type/protocol.
-      // Assuming TCP/IPv4 for now, but should get from io_object if possible.
-      // AsyncServerSocket doesn't expose it easily, but we can assume generic.
-      // Or we can use the same family as the listening socket.
-      // Let's assume AF_INET for now or try to detect.
-      // For simplicity, let's create AF_INET.
-      // TODO: Support IPv6 properly by checking listening socket.
-      op->accept_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+      // We determine the family from the listening socket.
+      int family = AF_INET;
+      struct sockaddr_storage listen_addr;
+      int listen_addr_len = sizeof(listen_addr);
+      if (getsockname(fd, (struct sockaddr*)&listen_addr, &listen_addr_len) ==
+          0) {
+        family = listen_addr.ss_family;
+      }
+
+      op->accept_sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
       if (op->accept_sock == INVALID_SOCKET) {
         op->error = std::make_error_code(std::errc::io_error);
         op->scheduler->schedule(op->coro_handle);

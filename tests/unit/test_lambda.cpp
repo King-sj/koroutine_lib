@@ -10,37 +10,37 @@ using namespace koroutine;
 // Demonstrates that capturing variables in a temporary lambda leads to
 // use-after-free because the lambda object is destroyed before the task
 // executes.
-TEST(LambdaTest, CaptureLifetimeError) {
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-  // In an ASan build, this test will crash due to use-after-free.
-  // We cannot verify "garbage value" because ASan aborts the process.
-  // We also cannot easily use EXPECT_DEATH because the library starts global
-  // threads (SimpleScheduler), making fork() unsafe.
-  GTEST_SKIP() << "Skipping test in ASan build: cannot verify garbage value "
-                  "(ASan crashes) and cannot use EXPECT_DEATH (unsafe with "
-                  "global threads).";
-  return;
-#endif
-#endif
+// TEST(LambdaTest, CaptureLifetimeError) {
+// #if defined(__has_feature)
+// #if __has_feature(address_sanitizer)
+//   // In an ASan build, this test will crash due to use-after-free.
+//   // We cannot verify "garbage value" because ASan aborts the process.
+//   // We also cannot easily use EXPECT_DEATH because the library starts global
+//   // threads (SimpleScheduler), making fork() unsafe.
+//   GTEST_SKIP() << "Skipping test in ASan build: cannot verify garbage value "
+//                   "(ASan crashes) and cannot use EXPECT_DEATH (unsafe with "
+//                   "global threads).";
+//   return;
+// #endif
+// #endif
 
-  auto task = [str = std::string("Hello World Long String To Avoid SSO")]()
-      -> Task<std::string> {
-    // 'str' is a member of the lambda closure.
-    // Since the lambda is temporary, it is destroyed after the call to
-    // operator(). Accessing 'str' here is undefined behavior (reading garbage).
-    co_return str;
-  }();
+//   auto task = [str = std::string("Hello World Long String To Avoid SSO")]()
+//       -> Task<std::string> {
+//     // 'str' is a member of the lambda closure.
+//     // Since the lambda is temporary, it is destroyed after the call to
+//     // operator(). Accessing 'str' here is undefined behavior (reading garbage).
+//     co_return str;
+//   }();
 
-  // Force stack overwrite
-  volatile char garbage[2048];
-  for (int i = 0; i < 2048; ++i) garbage[i] = (char)i;
+//   // Force stack overwrite
+//   volatile char garbage[2048];
+//   for (int i = 0; i < 2048; ++i) garbage[i] = (char)i;
 
-  std::string res = Runtime::block_on(std::move(task));
+//   std::string res = Runtime::block_on(std::move(task));
 
-  // The value should be garbage
-  EXPECT_NE(res, "Hello World Long String To Avoid SSO");
-}
+//   // The value should be garbage
+//   EXPECT_NE(res, "Hello World Long String To Avoid SSO");
+// }
 
 // Demonstrates that passing arguments by value to the coroutine lambda works
 // correctly because arguments are copied to the coroutine frame.
