@@ -45,4 +45,4 @@ output/
 *.dwo
 
 # cmake build folder
-build/
+build*/

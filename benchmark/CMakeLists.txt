@@ -1,0 +1,2 @@
+add_executable(http_server_bench http_server_bench.cpp)
+target_link_libraries(http_server_bench PRIVATE koroutinelib_static)

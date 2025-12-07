@@ -34,6 +34,57 @@
   - 内置轻量级日志系统，可追踪协程生命周期和调度细节。
 - ✅ **零依赖**: 除了 C++ 标准库，不依赖任何第三方库。
 
+## 📊 性能基准测试
+
+在 macOS 开发环境下，`koroutine_lib` 的 HTTP 服务展现了优秀的性能。
+
+![Benchmark Result](imgs/benchmark_result.png)
+
+### 详细数据
+
+| 并发数 (Concurrency) | QPS (Req/sec) | 平均延迟 (Latency) |
+| -------------------- | ------------- | ------------------ |
+| 10                   | 18,544        | 0.47 ms            |
+| 50                   | 18,874        | 2.54 ms            |
+| 100                  | 18,837        | 5.29 ms            |
+| 200                  | 19,350        | 10.32 ms           |
+| 500                  | 19,296        | 25.75 ms           |
+| 1000                 | 19,034        | 19.71 ms           |
+
+> **测试环境**: macOS, Apple M4, 16GB RAM, Release Build, Keep-Alive Enabled.
+> **测试工具**: `wrk` (10s duration)
+
+### 🆚 性能对比 (参考)
+
+为了更直观地评估性能，我们将 `koroutine_lib` 与其他知名软件/框架在类似单核环境下的典型性能进行了对比：
+
+| 软件/框架 | 类型 | 典型 QPS (单核) | 说明 |
+| :--- | :--- | :--- | :--- |
+| **Koroutine Lib** | **C++23 Library** | **~19,350** | **当前版本 (单线程, 无锁)** |
+| **Nginx** | Web Server | **~22,000** | **本机实测 (M4)** |
+| **Redis** | In-Memory DB | ~100,000+ | 极致优化的 C 单线程事件循环 |
+| **Go (net/http)** | Language Stdlib | ~30,000 - 60,000 | 经过高度优化的 Go Runtime |
+| **Node.js** | Runtime | ~10,000 - 15,000 | V8 引擎, 事件驱动 |
+| **Python (FastAPI)** | Web Framework | ~5,000 - 10,000 | 优秀的异步 Python 框架 |
+
+*注：Nginx 数据为本机 (Apple M4) 实测值，配置为 `worker_processes 1`，响应 "Hello World!"。其他数据为行业典型参考值。*
+
+## 🔮 未来改进路线
+
+## 🔮 未来改进路线
+
+为了进一步突破性能瓶颈，我们计划在未来版本中引入以下优化：
+
+1. **深度优化 HTTP 协议栈**:
+   * 目前的 HTTP 实现基于 `cpp-httplib`。虽然功能完善，但其部分逻辑并非为纯异步原生设计。
+   * 计划重构核心解析逻辑，消除不必要的同步假设，使其完全适配协程模型。
+2. **多 Reactor 模型 (Multi-Reactor)**:
+   * 支持 `One Loop Per Thread` 模式，充分利用多核 CPU 资源，预期性能将随核心数线性增长。
+3. **零拷贝 (Zero-Copy) 优化**:
+   * 减少 I/O 路径上的内存拷贝，利用 `std::string_view` 和 `std::span` 优化数据传递。
+4. **Linux io_uring 支持**:
+   * 在 Linux 平台上利用 `io_uring` 替代 `epoll`，大幅减少系统调用开销。
+
 ## 🧭 Task Manager
 
 `TaskManager` 是一个用于管理一组协程任务（以组为单位）的轻量级工具。它支持：

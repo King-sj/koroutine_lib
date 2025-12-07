@@ -21,6 +21,27 @@
 - 🌐 **异步 HTTP**: 内置基于 `cpp-httplib` 的全异步 HTTP 客户端与服务端。
 - 🧩 **易于集成**: 提供单文件头文件 (`single_header`) 和预编译库，开箱即用。
 
+## 📊 性能表现
+
+`koroutine_lib` 在设计上追求低开销与高吞吐。在标准的 macOS 开发机 (Apple M4, 16GB) 上，单核心 HTTP 服务可轻松处理 **19k+ QPS**，且在低并发下保持亚毫秒级延迟。
+
+![Benchmark Result](imgs/benchmark_result.png)
+
+### 🆚 性能对比 (参考)
+
+| 软件/框架 | 典型 QPS (单核) | 说明 |
+| :--- | :--- | :--- |
+| **Koroutine** | **~19k** | **C++23 协程 (当前)** |
+| **Nginx** | **~22k** | **本机实测 (M4)** |
+| **Redis** | ~100k+ | 极致优化的 C 单线程 |
+| **Node.js** | ~12k | V8 事件驱动 |
+
+### 🔮 未来规划
+
+- **HTTP 栈原生异步化**: 优化 `cpp-httplib` 的非异步逻辑，减少拷贝与阻塞。
+- **多线程 Reactor**: 充分利用多核性能。
+- **io_uring**: Linux 下的极致 I/O 性能。
+
 ## 快速链接
 
 <div class="grid cards" markdown>
