@@ -67,6 +67,8 @@ class ScheduleRequest {
    */
   void resume() const {
     if (handle_) {
+      LOG_TRACE("ScheduleRequest::resume - resuming handle: ",
+                handle_.address());
       handle_.resume();
     }
   }
