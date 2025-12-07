@@ -106,3 +106,53 @@ int main() {
 
 在下一章节，我们将深入探讨 `Task` 的更多用法。
 
+## 4. 下载方式
+
+你可以通过以下方式获取 `koroutine_lib`：
+
+- **GitHub Releases (推荐)**: 下载预编译好的库文件和头文件。
+  [前往下载页面 :arrow_right:](https://github.com/King-sj/koroutine_lib/releases)
+
+- **源码克隆**:
+  ```bash
+  git clone https://github.com/King-sj/koroutine_lib.git
+  ```
+
+## 5. 其他集成方案
+
+除了使用预编译包，你也可以选择以下方式集成：
+
+### 源码集成 (add_subdirectory)
+
+如果你希望将 `koroutine_lib` 作为子项目编译：
+
+1.  将仓库作为子模块添加到你的项目中：
+    ```bash
+    git submodule add https://github.com/King-sj/koroutine_lib.git third_party/koroutine_lib
+    ```
+
+2.  在 `CMakeLists.txt` 中添加：
+    ```cmake
+    add_subdirectory(third_party/koroutine_lib)
+    target_link_libraries(my_app PRIVATE koroutinelib)
+    ```
+
+### FetchContent (CMake 3.11+)
+
+使用 CMake 的 `FetchContent` 模块自动下载并集成：
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+  koroutine_lib
+  GIT_REPOSITORY https://github.com/King-sj/koroutine_lib.git
+  GIT_TAG        main  # 建议指定具体的 tag 或 commit hash
+)
+
+FetchContent_MakeAvailable(koroutine_lib)
+
+target_link_libraries(my_app PRIVATE koroutinelib)
+```
+
+
