@@ -48,6 +48,32 @@ python check_tasks.py ../../src --compile-db ../../build
 Checking /path/to/koroutine_lib/tests/unit/test_http.cpp...
 
 Violations in test_http.cpp
+```
+
+## Upstream Update Checker
+
+由于 `koroutine` 的 HTTP 模块深度参考了 `cpp-httplib`，为了保持与上游的同步，我们提供了一个自动检查脚本。
+
+### 工作原理
+
+脚本 `scripts/check_httplib_updates.py` 会对比 `cpp-httplib` 仓库的最新提交与本地记录的上次同步点（`.httplib_last_sync`）。如果发现新提交，脚本会列出它们并以非零状态码退出，从而中断构建过程，提醒开发者关注。
+
+### 如何处理更新
+
+当构建因为发现上游更新而失败时：
+
+1.  运行脚本查看更新内容：
+    ```bash
+    python3 scripts/check_httplib_updates.py
+    ```
+2.  分析列出的 Commit，决定是否需要移植到 `koroutine`。
+3.  如果决定移植，请参考上游修改手动应用到 `include/koroutine/async_io/httplib.h`。
+4.  处理完毕后（或决定忽略），更新同步点：
+    ```bash
+    # 脚本输出会提示具体的命令，例如：
+    echo <latest_commit_hash> > scripts/.httplib_last_sync
+    ```
+
 ┏━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Line ┃ Message                                                      ┃ Code                         ┃
 ┡━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩

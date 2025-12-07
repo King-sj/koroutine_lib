@@ -77,3 +77,10 @@ add_custom_target(koroutine_single_header
     DEPENDS ${CMAKE_BINARY_DIR}/include/koroutine/koroutine.hpp
     COMMENT "Target to (re)generate single-header koroutine.hpp"
 )
+
+# Check for upstream updates
+add_custom_target(check_upstream_updates ALL
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_httplib_updates.py
+    COMMENT "Checking for upstream updates in cpp-httplib..."
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)

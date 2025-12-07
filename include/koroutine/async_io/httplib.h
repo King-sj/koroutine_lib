@@ -852,6 +852,50 @@ struct Response {
   std::string file_content_content_type_;
 };
 
+enum class Error {
+  Success = 0,
+  Unknown,
+  Connection,
+  BindIPAddress,
+  Read,
+  Write,
+  ExceedRedirectCount,
+  Canceled,
+  SSLConnection,
+  SSLLoadingCerts,
+  SSLServerVerification,
+  SSLServerHostnameVerification,
+  UnsupportedMultipartBoundaryChars,
+  Compression,
+  ConnectionTimeout,
+  ProxyConnection,
+  ConnectionClosed,
+  Timeout,
+  ResourceExhaustion,
+  TooManyFormDataFiles,
+  ExceedMaxPayloadSize,
+  ExceedUriMaxLength,
+  ExceedMaxSocketDescriptorCount,
+  InvalidRequestLine,
+  InvalidHTTPMethod,
+  InvalidHTTPVersion,
+  InvalidHeaders,
+  MultipartParsing,
+  OpenFile,
+  Listen,
+  GetSockName,
+  UnsupportedAddressFamily,
+  HTTPParsing,
+  InvalidRangeHeader,
+
+  // For internal use only
+  SSLPeerCouldBeClosed_,
+};
+
+std::string to_string(Error error);
+
+std::ostream& operator<<(std::ostream& os, const Error& obj);
+
 class Stream {
  public:
   virtual ~Stream() = default;
@@ -871,6 +915,11 @@ class Stream {
   koroutine::Task<ssize_t> write(const char* ptr);
   koroutine::Task<ssize_t> write(const std::string& s);
   virtual koroutine::Task<bool> getline(std::string& out);
+
+  Error get_error() const { return error_; }
+
+ protected:
+  Error error_ = Error::Success;
 };
 
 class TaskQueue {
@@ -1320,48 +1369,6 @@ class Server {
   std::function<koroutine::Task<ssize_t>(Stream&, Headers&)> header_writer_ =
       detail::write_headers;
 };
-
-enum class Error {
-  Success = 0,
-  Unknown,
-  Connection,
-  BindIPAddress,
-  Read,
-  Write,
-  ExceedRedirectCount,
-  Canceled,
-  SSLConnection,
-  SSLLoadingCerts,
-  SSLServerVerification,
-  SSLServerHostnameVerification,
-  UnsupportedMultipartBoundaryChars,
-  Compression,
-  ConnectionTimeout,
-  ProxyConnection,
-  ResourceExhaustion,
-  TooManyFormDataFiles,
-  ExceedMaxPayloadSize,
-  ExceedUriMaxLength,
-  ExceedMaxSocketDescriptorCount,
-  InvalidRequestLine,
-  InvalidHTTPMethod,
-  InvalidHTTPVersion,
-  InvalidHeaders,
-  MultipartParsing,
-  OpenFile,
-  Listen,
-  GetSockName,
-  UnsupportedAddressFamily,
-  HTTPParsing,
-  InvalidRangeHeader,
-
-  // For internal use only
-  SSLPeerCouldBeClosed_,
-};
-
-std::string to_string(Error error);
-
-std::ostream& operator<<(std::ostream& os, const Error& obj);
 
 class Result {
  public:
@@ -2548,6 +2555,10 @@ inline std::string to_string(const Error error) {
       return "Connection timed out";
     case Error::ProxyConnection:
       return "Proxy connection failed";
+    case Error::ConnectionClosed:
+      return "Connection closed by server";
+    case Error::Timeout:
+      return "Read timeout";
     case Error::ResourceExhaustion:
       return "Resource exhaustion";
     case Error::TooManyFormDataFiles:
@@ -2782,7 +2793,7 @@ enum class EncodingType { None = 0, Gzip, Brotli, Zstd };
 
 EncodingType encoding_type(const Request& req, const Response& res);
 
-class BufferStream final : public Stream {
+class BufferStream final : public ::httplib::Stream {
  public:
   BufferStream() = default;
   ~BufferStream() override = default;
@@ -2803,6 +2814,9 @@ class BufferStream final : public Stream {
   std::string buffer;
   size_t position = 0;
 };
+
+static_assert(std::is_convertible<BufferStream*, Stream*>::value,
+              "BufferStream not convertible to Stream");
 
 class compressor {
  public:
@@ -3058,7 +3072,7 @@ inline bool is_field_value(const std::string& s) { return is_field_content(s); }
 namespace detail {
 
 inline bool is_hex(char c, int& v) {
-  if (0x20 <= c && isdigit(c)) {
+  if (isdigit(c)) {
     v = c - '0';
     return true;
   } else if ('A' <= c && c <= 'F') {
@@ -3904,7 +3918,12 @@ class SocketStream final : public Stream {
   std::shared_ptr<koroutine::async_io::AsyncSocket> sock_;
 };
 
-class BufferedStream final : public Stream {
+static_assert(std::is_convertible<SocketStream*, Stream*>::value,
+              "SocketStream not convertible to Stream");
+static_assert(std::is_same<Stream, ::httplib::Stream>::value,
+              "Stream is not ::httplib::Stream");
+
+class BufferedStream final : public ::httplib::Stream {
  public:
   BufferedStream(Stream& inner, size_t buf_size = 4096)
       : inner_(inner), buf_size_(buf_size) {
@@ -4116,7 +4135,8 @@ inline koroutine::Task<bool> process_server_socket(
         SocketStream strm(sock, read_timeout_sec, read_timeout_usec,
                           write_timeout_sec, write_timeout_usec);
         BufferedStream bstrm(strm);
-        co_return co_await callback(bstrm, close_connection, connection_closed);
+        co_return co_await callback(static_cast<Stream&>(bstrm),
+                                    close_connection, connection_closed);
       });
 }
 
@@ -5724,7 +5744,7 @@ koroutine::Task<bool> read_content(Stream& strm, T& x,
       });
 }
 
-inline koroutine::Task<ssize_t> write_request_line(Stream& strm,
+inline koroutine::Task<ssize_t> write_request_line(::httplib::Stream& strm,
                                                    const std::string& method,
                                                    std::string path) {
   std::string s = method;
@@ -6065,6 +6085,40 @@ inline void parse_query_text(const char* data, std::size_t size,
 
 inline void parse_query_text(const std::string& s, Params& params) {
   parse_query_text(s.data(), s.size(), params);
+}
+
+// Normalize a query string by decoding and re-encoding each key/value pair
+// while preserving the original parameter order. This avoids double-encoding
+// and ensures consistent encoding without reordering (unlike Params which
+// uses std::multimap and sorts keys).
+inline std::string normalize_query_string(const std::string& query) {
+  std::string result;
+  split(query.data(), query.data() + query.size(), '&',
+        [&](const char* b, const char* e) {
+          std::string key;
+          std::string val;
+          divide(b, static_cast<std::size_t>(e - b), '=',
+                 [&](const char* lhs_data, std::size_t lhs_size,
+                     const char* rhs_data, std::size_t rhs_size) {
+                   key.assign(lhs_data, lhs_size);
+                   val.assign(rhs_data, rhs_size);
+                 });
+
+          if (!key.empty()) {
+            auto dec_key = decode_query_component(key);
+            auto dec_val = decode_query_component(val);
+
+            if (!result.empty()) {
+              result += '&';
+            }
+            result += encode_query_component(dec_key);
+            if (!val.empty() || std::find(b, e, '=') != e) {
+              result += '=';
+              result += encode_query_component(dec_val);
+            }
+          }
+        });
+  return result;
 }
 
 inline bool parse_multipart_boundary(const std::string& content_type,
@@ -7980,7 +8034,16 @@ inline bool SocketStream::wait_readable() const { return true; }
 inline bool SocketStream::wait_writable() const { return true; }
 
 inline koroutine::Task<ssize_t> SocketStream::read(char* ptr, size_t size) {
-  co_return co_await sock_->read(ptr, size);
+  try {
+    auto n = co_await sock_->read(ptr, size);
+    if (n == 0) {
+      error_ = Error::ConnectionClosed;
+    }
+    co_return static_cast<ssize_t>(n);
+  } catch (...) {
+    error_ = Error::Read;
+    co_return -1;
+  }
 }
 
 inline koroutine::Task<ssize_t> SocketStream::write(const char* ptr,
@@ -10336,10 +10399,14 @@ inline koroutine::Task<ClientImpl::StreamHandle> ClientImpl::open_stream(
             write_timeout_sec_, write_timeout_usec_));
   }
 #else
-  handle.socket_stream_ = detail::make_unique<detail::BufferedStream>(
-      detail::make_unique<detail::SocketStream>(
-          handle.connection_->sock, read_timeout_sec_, read_timeout_usec_,
-          write_timeout_sec_, write_timeout_usec_));
+  auto sock_strm = detail::make_unique<detail::SocketStream>(
+      handle.connection_->sock, read_timeout_sec_, read_timeout_usec_,
+      write_timeout_sec_, write_timeout_usec_);
+  ::httplib::Stream* raw_sock_strm =
+      static_cast<::httplib::Stream*>(sock_strm.release());
+  handle.socket_stream_ = std::unique_ptr<::httplib::Stream>(
+      static_cast<::httplib::Stream*>(new detail::BufferedStream(
+          std::unique_ptr<::httplib::Stream>(raw_sock_strm))));
 #endif
   handle.stream_ = handle.socket_stream_.get();
 
@@ -10986,14 +11053,31 @@ inline koroutine::Task<bool> ClientImpl::write_request(Stream& strm,
     auto path_with_query =
         path_encode_ ? detail::encode_path(path_part) : path_part;
 
-    detail::parse_query_text(query_part, req.params);
-    if (!req.params.empty()) {
-      path_with_query = append_query_params(path_with_query, req.params);
+    if (!query_part.empty()) {
+      // Normalize the query string (decode then re-encode) while preserving
+      // the original parameter order.
+      auto normalized = detail::normalize_query_string(query_part);
+      if (!normalized.empty()) {
+        path_with_query += '?' + normalized;
+      }
+
+      // Still populate req.params for handlers/users who read them.
+      detail::parse_query_text(query_part, req.params);
+    } else {
+      // No query in path; parse any query_part (empty) and append params
+      // from `req.params` when present (preserves prior behavior for
+      // callers who provide Params separately).
+      detail::parse_query_text(query_part, req.params);
+      if (!req.params.empty()) {
+        path_with_query = append_query_params(path_with_query, req.params);
+      }
     }
 
     // Write request line and headers
-    co_await detail::write_request_line(bstrm, req.method, path_with_query);
-    co_await header_writer_(bstrm, req.headers);
+    co_await detail::write_request_line(static_cast<::httplib::Stream&>(bstrm),
+                                        req.method, path_with_query);
+    co_await header_writer_(static_cast<::httplib::Stream&>(bstrm),
+                            req.headers);
 
     // Flush buffer
     auto& data = bstrm.get_buffer();
